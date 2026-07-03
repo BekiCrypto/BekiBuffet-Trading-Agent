@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { verifyDirectPayment, getCryptoPaymentMode } from "@/lib/crypto-payments";
+import { verifyDirectPayment, isCryptoPaymentEnabled } from "@/lib/crypto-payments";
 import { logger, sanitizeError } from "@/lib/logger";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Verify a direct blockchain payment (user submits tx hash for verification)
+// Verify a self-custody blockchain payment (user submits tx hash)
+// System checks BSC blockchain for the USDT transfer to our wallet
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,11 +19,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429, headers: rateLimitHeaders(rl) });
   }
 
-  const mode = getCryptoPaymentMode();
-  if (mode !== "direct") {
+  if (!isCryptoPaymentEnabled()) {
     return NextResponse.json(
-      { error: "Direct verification not active. Using NOWPayments gateway." },
-      { status: 400 }
+      { error: "Crypto payments are not configured." },
+      { status: 503 }
     );
   }
 
@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
       paymentId,
       confirmed: result.confirmed,
       confirmations: result.confirmations,
+      txHash: result.txHash,
     });
 
     return NextResponse.json(result);

@@ -84,16 +84,15 @@ export function validateProductionConfig(): StartupValidation {
   });
   if (isProd && !encryptionConfigured) errors.push("Encryption key is not configured — broker credentials cannot be securely stored");
 
-  // --- Crypto Payments (required in production for paid tiers) ---
-  const nowpaymentsKey = process.env.NOWPAYMENTS_API_KEY;
+  // --- Crypto Payments (self-custody, USDT BEP-20) ---
   const cryptoWallet = process.env.CRYPTO_RECEIVING_WALLET;
-  const cryptoConfigured = !!(nowpaymentsKey || cryptoWallet);
+  const cryptoConfigured = !!cryptoWallet && cryptoWallet.startsWith("0x") && cryptoWallet.length === 42;
   services.push({
-    name: "Crypto Payments (USDT BEP-20)",
+    name: "Crypto Payments (USDT BEP-20, Self-Custody)",
     configured: cryptoConfigured,
     required: isProd,
     error: isProd && !cryptoConfigured
-      ? "NOWPAYMENTS_API_KEY or CRYPTO_RECEIVING_WALLET is required for billing"
+      ? "CRYPTO_RECEIVING_WALLET is required for billing (your BSC wallet address)"
       : undefined,
   });
   if (isProd && !cryptoConfigured) {

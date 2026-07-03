@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { isRealMarketDataEnabled } from "@/lib/marketDataFeed";
-import { isCryptoPaymentEnabled, getCryptoPaymentMode } from "@/lib/crypto-payments";
+import { isCryptoPaymentEnabled, getReceivingWallet } from "@/lib/crypto-payments";
 import { validateProductionConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 
@@ -28,13 +28,14 @@ export async function GET() {
     status: isRealMarketDataEnabled() ? "live" : (config.environment === "production" ? "error" : "simulator"),
   };
 
-  // Crypto payment check
-  const cryptoMode = getCryptoPaymentMode();
+  // Crypto payment check (self-custody, USDT BEP-20)
   checks.cryptoPayments = {
     status: isCryptoPaymentEnabled() ? "ok" : (config.environment === "production" ? "error" : "not_configured"),
     latency: undefined,
   };
-  (checks.cryptoPayments as any).mode = cryptoMode;
+  if (isCryptoPaymentEnabled()) {
+    (checks.cryptoPayments as any).wallet = getReceivingWallet();
+  }
 
   // Google OAuth check
   checks.googleOAuth = {

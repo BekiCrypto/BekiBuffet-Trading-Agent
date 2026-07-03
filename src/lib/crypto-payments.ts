@@ -1,22 +1,21 @@
 // ============================================================================
-// BekiBuffet SaaS — Crypto Payment System (USDT BEP-20)
+// BekiBuffet SaaS — Crypto Payment System (USDT BEP-20, Self-Custody)
 // ============================================================================
 // Accepts subscription payments in USDT on Binance Smart Chain (BEP-20).
 //
-// Two payment modes:
-//   1. NOWPayments Gateway — third-party payment processor
-//      (easiest, handles wallet generation + webhooks)
-//   2. Direct Blockchain — monitor BSC for incoming USDT transfers
-//      (more decentralized, no third party)
+// This is a SELF-CUSTODY system — no third-party payment processor.
+// Users send USDT BEP-20 directly to your wallet. The system verifies
+// incoming transfers on the BSC blockchain using viem.
 //
-// The system auto-detects which mode to use based on environment variables:
-//   - NOWPAYMENTS_API_KEY set → use NOWPayments gateway
-//   - CRYPTO_RECEIVING_WALLET set → use direct blockchain verification
+// Required environment variable:
+//   CRYPTO_RECEIVING_WALLET=0xYourBscWalletAddress
+//
+// The wallet is fully under your control. No NOWPayments, no gateway,
+// no intermediary. Funds go directly to your wallet.
 // ============================================================================
 
 import { createPublicClient, http, parseAbiItem, formatUnits, type Hash } from "viem";
 import { bsc } from "viem/chains";
-import crypto from "crypto";
 import { db } from "./db";
 import { logger } from "./logger";
 import { sendTemplatedEmail } from "./email";
@@ -26,7 +25,10 @@ import type { Tier } from "./saas";
 const USDT_CONTRACT = "0x55d398326f99059fF775485246999027B3197955" as const;
 const USDT_DECIMALS = 18;
 
-// Tier pricing in USD (monthly)
+// Minimum confirmations required (12 blocks ≈ 36 seconds on BSC)
+const MIN_CONFIRMATIONS = 12;
+
+// Tier pricing in USD (monthly). USDT is pegged 1:1 to USD.
 const TIER_PRICES_USD: Record<Tier, number> = {
   FREE: 0,
   PRO: 149,
@@ -41,7 +43,7 @@ const TIER_CONFIG: Record<Tier, { seats: number; capital: number; risk: number; 
   INSTITUTIONAL: { seats: 100, capital: 100000000, risk: 3.0, credits: 100000 },
 };
 
-// BSC public client for blockchain verification
+// BSC public client for blockchain verification (singleton)
 let bscClient: ReturnType<typeof createPublicClient> | null = null;
 
 function getBscClient() {
@@ -55,20 +57,15 @@ function getBscClient() {
 }
 
 /**
- * Check which crypto payment mode is active.
+ * Check if crypto payments are configured.
+ * Returns true when CRYPTO_RECEIVING_WALLET is set.
  */
-export function getCryptoPaymentMode(): "nowpayments" | "direct" | "none" {
-  if (process.env.NOWPAYMENTS_API_KEY) return "nowpayments";
-  if (process.env.CRYPTO_RECEIVING_WALLET) return "direct";
-  return "none";
-}
-
 export function isCryptoPaymentEnabled(): boolean {
-  return getCryptoPaymentMode() !== "none";
+  return !!process.env.CRYPTO_RECEIVING_WALLET && process.env.CRYPTO_RECEIVING_WALLET.startsWith("0x");
 }
 
 /**
- * Get the receiving wallet address for direct payments.
+ * Get the receiving wallet address (self-custody — your wallet).
  */
 export function getReceivingWallet(): string | null {
   return process.env.CRYPTO_RECEIVING_WALLET || null;
@@ -76,7 +73,7 @@ export function getReceivingWallet(): string | null {
 
 /**
  * Create a crypto payment request.
- * Returns payment instructions for the user.
+ * Returns payment instructions for the user to send USDT BEP-20.
  */
 export async function createCryptoPayment(
   userId: string,
@@ -91,149 +88,29 @@ export async function createCryptoPayment(
   currency: string;
   network: string;
   expiresAt: Date;
-  checkoutUrl?: string;
-  qrCode?: string;
   error?: string;
 }> {
   const priceUsd = TIER_PRICES_USD[tier] * (billingCycle === "annual" ? 10 : 1); // Annual = 10 months (2 months free)
-  // USDT is pegged 1:1 to USD
-  const amountUsdt = priceUsd;
+  const amountUsdt = priceUsd; // USDT pegged 1:1 to USD
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour to pay
 
-  const mode = getCryptoPaymentMode();
+  const receivingAddress = process.env.CRYPTO_RECEIVING_WALLET;
 
-  if (mode === "nowpayments") {
-    return createNowPaymentsPayment(userId, userEmail, tier, amountUsdt, expiresAt, billingCycle);
-  } else if (mode === "direct") {
-    return createDirectPayment(userId, tier, amountUsdt, expiresAt, billingCycle);
-  }
-
-  return {
-    paymentId: "",
-    amount: priceUsd,
-    amountUsdt,
-    receivingAddress: "",
-    currency: "USDT",
-    network: "BSC",
-    expiresAt,
-    error: "Crypto payments are not configured. Set NOWPAYMENTS_API_KEY or CRYPTO_RECEIVING_WALLET.",
-  };
-}
-
-/**
- * NOWPayments gateway integration.
- */
-async function createNowPaymentsPayment(
-  userId: string,
-  userEmail: string,
-  tier: Tier,
-  amountUsdt: number,
-  expiresAt: Date,
-  billingCycle: string
-) {
-  const apiKey = process.env.NOWPAYMENTS_API_KEY!;
-  const baseUrl = process.env.NOWPAYMENTS_API_URL || "https://api.nowpayments.io";
-
-  try {
-    const resp = await fetch(`${baseUrl}/v1/payment`, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        price_amount: amountUsdt,
-        price_currency: "usd",
-        pay_currency: "usdt",
-        pay_network: "bsc",
-        order_id: `${userId}-${tier}-${Date.now()}`,
-        order_description: `BekiBuffet ${tier} subscription (${billingCycle})`,
-        ipn_callback_url: `${process.env.NEXTAUTH_URL}/api/crypto/webhook`,
-        success_url: `${process.env.NEXTAUTH_URL}/?payment=success`,
-        cancel_url: `${process.env.NEXTAUTH_URL}/?payment=canceled`,
-      }),
-    });
-
-    if (!resp.ok) {
-      const err = await resp.text();
-      logger.error("NOWPayments API error", { status: resp.status, error: err });
-      throw new Error(`NOWPayments API error: ${resp.status}`);
-    }
-
-    const data = await resp.json();
-
-    // Persist payment record
-    const payment = await db.cryptoPayment.create({
-      data: {
-        userId,
-        tier,
-        amount: amountUsdt,
-        amountUsdt,
-        currency: "USDT",
-        network: "BSC",
-        status: "PENDING",
-        paymentId: data.payment_id,
-        toAddress: data.pay_address,
-        expiresAt,
-      },
-    });
-
-    // Link to subscription
-    const sub = await db.subscription.findUnique({ where: { userId } });
-    if (sub) {
-      await db.cryptoPayment.update({
-        where: { id: payment.id },
-        data: { subscriptionId: sub.id },
-      });
-    }
-
-    logger.info("NOWPayments payment created", {
-      userId,
-      tier,
-      paymentId: data.payment_id,
-      amount: amountUsdt,
-    });
-
-    return {
-      paymentId: data.payment_id,
-      amount: amountUsdt,
-      amountUsdt,
-      receivingAddress: data.pay_address,
-      currency: "USDT",
-      network: "BSC",
-      expiresAt,
-      checkoutUrl: data.invoice_url,
-      qrCode: data.qr_code,
-    };
-  } catch (e: any) {
-    logger.error("NOWPayments payment creation failed", { error: e.message });
+  if (!receivingAddress) {
     return {
       paymentId: "",
-      amount: amountUsdt,
+      amount: priceUsd,
       amountUsdt,
       receivingAddress: "",
       currency: "USDT",
       network: "BSC",
       expiresAt,
-      error: e.message,
+      error: "Crypto payments are not configured. Set CRYPTO_RECEIVING_WALLET environment variable.",
     };
   }
-}
-
-/**
- * Direct blockchain payment — user sends USDT to our wallet, we verify on-chain.
- */
-async function createDirectPayment(
-  userId: string,
-  tier: Tier,
-  amountUsdt: number,
-  expiresAt: Date,
-  billingCycle: string
-) {
-  const receivingAddress = process.env.CRYPTO_RECEIVING_WALLET!;
 
   // Generate a unique payment ID for tracking
-  const paymentId = `direct-${userId}-${Date.now()}`;
+  const paymentId = `bsc-${userId}-${Date.now()}`;
 
   // Persist payment record
   const payment = await db.cryptoPayment.create({
@@ -260,7 +137,7 @@ async function createDirectPayment(
     });
   }
 
-  logger.info("Direct crypto payment created", {
+  logger.info("Self-custody crypto payment created", {
     userId,
     tier,
     paymentId,
@@ -270,7 +147,7 @@ async function createDirectPayment(
 
   return {
     paymentId,
-    amount: amountUsdt,
+    amount: priceUsd,
     amountUsdt,
     receivingAddress,
     currency: "USDT",
@@ -280,7 +157,11 @@ async function createDirectPayment(
 }
 
 /**
- * Verify a direct blockchain payment by checking BSC for incoming USDT transfers.
+ * Verify a self-custody blockchain payment by checking BSC for incoming USDT.
+ *
+ * Two modes:
+ *   1. User submits a txHash — verify that specific transaction
+ *   2. No txHash — scan recent Transfer events to our wallet for matching amount
  */
 export async function verifyDirectPayment(
   paymentId: string,
@@ -289,6 +170,7 @@ export async function verifyDirectPayment(
   confirmed: boolean;
   amountReceived: number;
   confirmations: number;
+  txHash?: string;
   error?: string;
 }> {
   const payment = await db.cryptoPayment.findFirst({
@@ -299,12 +181,13 @@ export async function verifyDirectPayment(
     return { confirmed: false, amountReceived: 0, confirmations: 0, error: "Payment not found or already processed" };
   }
 
+  // Check expiry
   if (payment.expiresAt && Date.now() > payment.expiresAt.getTime()) {
     await db.cryptoPayment.update({
       where: { id: payment.id },
       data: { status: "EXPIRED" },
     });
-    return { confirmed: false, amountReceived: 0, confirmations: 0, error: "Payment expired" };
+    return { confirmed: false, amountReceived: 0, confirmations: 0, error: "Payment expired — please create a new payment" };
   }
 
   const client = getBscClient();
@@ -317,6 +200,13 @@ export async function verifyDirectPayment(
     if (!txHashToCheck) {
       const currentBlock = await client.getBlockNumber();
       const fromBlock = currentBlock > 1000n ? currentBlock - 1000n : 0n;
+
+      logger.info("Scanning BSC for incoming USDT transfers", {
+        paymentId,
+        receivingAddress,
+        fromBlock: fromBlock.toString(),
+        toBlock: currentBlock.toString(),
+      });
 
       const logs = await client.getLogs({
         address: USDT_CONTRACT,
@@ -332,24 +222,30 @@ export async function verifyDirectPayment(
         if (!value) continue;
         const amount = parseFloat(formatUnits(value, USDT_DECIMALS));
 
-        // Allow small slippage (0.5%)
+        // Allow small slippage (0.5%) for gas/fees
         if (amount >= payment.amountUsdt * 0.995) {
           txHashToCheck = log.transactionHash;
+          logger.info("Matching transfer found", { paymentId, txHash: txHashToCheck, amount });
           break;
         }
       }
 
       if (!txHashToCheck) {
-        return { confirmed: false, amountReceived: 0, confirmations: 0, error: "No matching transfer found yet" };
+        return {
+          confirmed: false,
+          amountReceived: 0,
+          confirmations: 0,
+          error: "No matching USDT transfer found yet. Send the payment and try again, or submit the transaction hash manually.",
+        };
       }
     }
 
-    // Get transaction receipt for confirmations
+    // Get transaction receipt for confirmation count
     const receipt = await client.getTransactionReceipt({ hash: txHashToCheck });
     const currentBlock = await client.getBlockNumber();
     const confirmations = Number(currentBlock - receipt.blockNumber);
 
-    // Parse transfer amount from logs
+    // Parse transfer amount from receipt logs
     let amountReceived = 0;
     for (const log of receipt.logs) {
       if (log.address.toLowerCase() === USDT_CONTRACT.toLowerCase()) {
@@ -361,8 +257,7 @@ export async function verifyDirectPayment(
       }
     }
 
-    // Require at least 12 confirmations (~36 seconds on BSC)
-    const MIN_CONFIRMATIONS = 12;
+    // Require minimum confirmations and correct amount
     const isConfirmed = confirmations >= MIN_CONFIRMATIONS && amountReceived >= payment.amountUsdt * 0.995;
 
     if (isConfirmed) {
@@ -380,16 +275,16 @@ export async function verifyDirectPayment(
       });
 
       // Activate subscription
-      await activateCryptoSubscription(payment.userId, payment.tier as Tier, payment.amountUsdt, txHashToCheck);
+      await activateCryptoSubscription(payment.userId, payment.tier as Tier, amountReceived, txHashToCheck);
 
-      logger.info("Direct crypto payment confirmed", {
+      logger.info("Self-custody payment confirmed", {
         paymentId,
         txHash: txHashToCheck,
         amount: amountReceived,
         confirmations,
       });
 
-      return { confirmed: true, amountReceived, confirmations };
+      return { confirmed: true, amountReceived, confirmations, txHash: txHashToCheck };
     }
 
     // Update confirmations but not yet confirmed
@@ -407,50 +302,18 @@ export async function verifyDirectPayment(
       confirmed: false,
       amountReceived,
       confirmations,
-      error: `Waiting for confirmations (${confirmations}/${MIN_CONFIRMATIONS})`,
+      txHash: txHashToCheck,
+      error: `Waiting for block confirmations (${confirmations}/${MIN_CONFIRMATIONS})`,
     };
   } catch (e: any) {
-    logger.error("Direct payment verification failed", { paymentId, error: e.message });
-    return { confirmed: false, amountReceived: 0, confirmations: 0, error: e.message };
-  }
-}
+    logger.error("Payment verification failed", { paymentId, error: e.message });
 
-/**
- * Handle NOWPayments webhook.
- */
-export async function handleNowPaymentsWebhook(payload: any): Promise<void> {
-  const { payment_id, payment_status, pay_address, pay_amount, order_id, tx_hash } = payload;
+    // If the tx hash is invalid, return a clear error
+    if (e.message?.includes("hash") || e.message?.includes("transaction")) {
+      return { confirmed: false, amountReceived: 0, confirmations: 0, error: "Invalid transaction hash — please check and try again" };
+    }
 
-  logger.info("NOWPayments webhook received", { paymentId: payment_id, status: payment_status });
-
-  const payment = await db.cryptoPayment.findFirst({
-    where: { paymentId: String(payment_id) },
-  });
-
-  if (!payment) {
-    logger.warn("NOWPayments webhook: payment not found", { paymentId: payment_id });
-    return;
-  }
-
-  if (payment_status === "finished" || payment_status === "confirmed") {
-    // Payment confirmed
-    await db.cryptoPayment.update({
-      where: { id: payment.id },
-      data: {
-        status: "CONFIRMED",
-        txHash: tx_hash,
-        fromAddress: pay_address,
-        confirmations: 100,
-        confirmedAt: new Date(),
-      },
-    });
-
-    await activateCryptoSubscription(payment.userId, payment.tier as Tier, parseFloat(pay_amount), tx_hash);
-  } else if (payment_status === "failed" || payment_status === "expired") {
-    await db.cryptoPayment.update({
-      where: { id: payment.id },
-      data: { status: "FAILED" },
-    });
+    return { confirmed: false, amountReceived: 0, confirmations: 0, error: `Verification failed: ${e.message}` };
   }
 }
 
@@ -512,7 +375,7 @@ async function activateCryptoSubscription(
       userId,
       type: "SUBSCRIPTION",
       action: "CRYPTO_PAYMENT_CONFIRMED",
-      detail: `${tier} subscription activated via USDT BEP-20 payment (tx: ${txHash})`,
+      detail: `${tier} subscription activated via USDT BEP-20 payment (tx: ${txHash}, amount: ${amountPaid} USDT)`,
     },
   });
 
@@ -524,22 +387,4 @@ async function activateCryptoSubscription(
  */
 export function getTierPrice(tier: Tier, billingCycle: "monthly" | "annual" = "monthly"): number {
   return TIER_PRICES_USD[tier] * (billingCycle === "annual" ? 10 : 1);
-}
-
-/**
- * Verify NOWPayments webhook signature.
- */
-export function verifyNowPaymentsSignature(
-  payload: string,
-  signature: string
-): boolean {
-  const secret = process.env.NOWPAYMENTS_IPN_SECRET;
-  if (!secret) return true; // Skip verification if no secret configured (not recommended for production)
-
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
-
-  return expected === signature;
 }

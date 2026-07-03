@@ -407,51 +407,40 @@ Google OAuth is fully integrated and auto-detected. When configured, users see a
 
 **Without Google OAuth configured**, the app falls back to demo credentials login (`demo@bekibuffet.ai` / `bekibuffet`), which is auto-provisioned on first visit.
 
-### Crypto Payments (USDT BEP-20)
+### Crypto Payments (USDT BEP-20, Self-Custody)
 
-BekiBuffet accepts subscription payments in **USDT on Binance Smart Chain (BEP-20)**. No Stripe, no credit cards — pure crypto.
+BekiBuffet accepts subscription payments in **USDT on Binance Smart Chain (BEP-20)**. **Self-custody only** — no Stripe, no credit cards, no NOWPayments, no third-party payment processor. Funds go directly to your wallet.
 
-**Two payment modes (choose one):**
+**Setup:**
 
-#### Mode 1: NOWPayments Gateway (Recommended)
-
-Third-party payment processor that handles wallet generation, payment tracking, and webhooks automatically.
-
-1. Sign up at [https://nowpayments.io](https://nowpayments.io)
-2. Create an API key in the dashboard
-3. Set the IPN secret for webhook verification
-4. Configure the IPN callback URL to: `https://yourdomain.com/api/crypto/webhook`
-5. Set environment variables:
-   ```env
-   NOWPAYMENTS_API_KEY=your-api-key
-   NOWPAYMENTS_IPN_SECRET=your-ipn-secret
-   NOWPAYMENTS_API_URL=https://api.nowpayments.io
-   ```
-
-#### Mode 2: Direct Blockchain (Decentralized)
-
-Monitor BSC for incoming USDT transfers to your wallet. No third party.
-
-1. Generate a BSC wallet address (MetaMask, Trust Wallet, etc.)
-2. Set environment variables:
+1. Get your BSC wallet address (MetaMask, Trust Wallet, Binance, Ledger, etc.)
+2. Switch your wallet to **BSC (Binance Smart Chain)** network
+3. Copy your address (starts with `0x`, 42 characters)
+4. Set it as `CRYPTO_RECEIVING_WALLET` in your `.env`:
    ```env
    CRYPTO_RECEIVING_WALLET=0xYourWalletAddress
-   # Optional: custom RPC (defaults to public BSC endpoint)
+   # Optional: custom RPC for higher reliability (defaults to public BSC endpoint)
    BSC_RPC_URL=https://bsc-dataseed.binance.org
    ```
-3. Users send USDT BEP-20 to your wallet address
-4. The system verifies transactions on-chain (12 confirmations required)
-5. Users can check payment status via `/api/crypto/verify`
 
-**How it works:**
+**How it works (self-custody, no intermediary):**
 
 1. User clicks "Upgrade" → `POST /api/crypto/checkout` creates a payment request
-2. User sends USDT BEP-20 to the receiving address
-3. Payment is verified:
-   - NOWPayments mode: webhook confirms payment → `/api/crypto/webhook`
-   - Direct mode: user submits tx hash → `/api/crypto/verify` checks BSC
+   - Returns: receiving address (your wallet), amount in USDT, expiration
+2. User sends USDT BEP-20 directly to your wallet from their Web3 wallet
+3. User submits the transaction hash → `POST /api/crypto/verify`
+   - System queries BSC blockchain using viem
+   - Verifies: transaction exists, USDT transferred to your address, correct amount
+   - Waits for 12 block confirmations (~36 seconds on BSC)
 4. Subscription activated automatically → email confirmation sent
-5. Payment recorded in `CryptoPayment` table with full audit trail
+5. Payment recorded in `CryptoPayment` table with full audit trail (txHash, blockNumber, confirmations)
+
+**Key properties:**
+- **Self-custody**: Funds go directly to your wallet — you hold the private keys
+- **No third party**: No NOWPayments, no payment gateway, no intermediary fees
+- **On-chain verification**: Every payment is verified against the BSC blockchain
+- **Automatic activation**: Subscription activates after 12 confirmations
+- **Full audit trail**: Every payment stored with txHash, block number, confirmations
 
 **USDT BEP-20 Contract:** `0x55d398326f99059fF775485246999027B3197955`
 
@@ -461,6 +450,13 @@ Monitor BSC for incoming USDT transfers to your wallet. No third party.
 | Pro | 149 USDT | 1,490 USDT |
 | Elite | 499 USDT | 4,990 USDT |
 | Institutional | 2,500 USDT | 25,000 USDT |
+
+**API Endpoints:**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/crypto/checkout` | Create payment request (returns wallet address + amount) |
+| POST | `/api/crypto/verify` | Verify payment by txHash (checks BSC blockchain) |
+| GET | `/api/crypto/status` | Check payment status |
 
 ## Risk Disclaimer
 
