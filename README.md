@@ -288,7 +288,9 @@ bun run db:deploy
 
 BekiBuffet uses **PostgreSQL via Neon** as the single source of truth for all environments. No SQLite is used anywhere.
 
-**Creating a Neon database:**
+**Schema management strategy:** Prisma migrations (`prisma/migrations/`). Migrations are applied automatically during every Vercel deployment via the `build` script (`prisma migrate deploy` runs before `next build`). No manual database steps are required after the initial setup.
+
+**Creating a Neon database (first-time setup):**
 
 1. Go to [https://console.neon.tech](https://console.neon.tech) and sign up / sign in
 2. Create a new project (e.g., `bekibuffet`)
@@ -296,22 +298,63 @@ BekiBuffet uses **PostgreSQL via Neon** as the single source of truth for all en
    ```
    postgresql://user:password@ep-cool-name-123456.us-east-2.aws.neon.tech/bekibuffet?sslmode=require
    ```
-4. Set it as `DATABASE_URL` in your `.env` (local) and in Vercel environment variables (production)
-5. Run `bun run db:push` to create all tables
-6. The build process automatically runs `prisma generate` before `next build` via the `postinstall` and `build` scripts
+4. Set it as `DATABASE_URL` in your `.env` (local) and in Vercel environment variables (production + preview)
 
-**Vercel deployment:**
+**Initializing the schema (run once):**
+
+After setting `DATABASE_URL`, initialize the database with all 12 tables:
+
+```bash
+# Option A: Use the init script (recommended — verifies all tables)
+./scripts/init-db.sh
+
+# Option B: Run prisma migrate deploy directly
+bun run db:deploy
+
+# Option C: If you prefer schema push (no migration history)
+bun run db:push
+```
+
+This creates the following 12 tables:
+- `User`, `Account`, `Session`, `VerificationToken` (NextAuth.js)
+- `Subscription`, `BrokerAccount` (SaaS + broker connections)
+- `Backtest`, `EdgeProfile` (backtesting + edge discovery)
+- `AgentState`, `Trade` (live trading + agent state)
+- `AIDecision`, `ActivityLog` (AI decisions + audit trail)
+
+**Vercel deployment (automatic migrations):**
 
 1. Push your code to GitHub
 2. Import the repository in Vercel
 3. Add environment variables in Vercel project settings:
-   - `DATABASE_URL` — your Neon PostgreSQL connection string
+   - `DATABASE_URL` — your Neon PostgreSQL connection string (set in Production + Preview)
    - `NEXTAUTH_URL` — your production URL (e.g., `https://your-app.vercel.app`)
    - `NEXTAUTH_SECRET` — a secure random string
    - `GOOGLE_CLIENT_ID` — from Google Cloud Console
    - `GOOGLE_CLIENT_SECRET` — from Google Cloud Console
-4. Deploy — Vercel runs `bun run build` which executes `prisma generate && next build`
-5. After the first deploy, run `bun run db:push` locally (with the production `DATABASE_URL`) to initialize the Neon schema
+4. Deploy — Vercel runs `bun run build` which executes:
+   ```
+   prisma generate → prisma migrate deploy → next build
+   ```
+   Migrations are applied automatically on every deploy. No manual steps required.
+
+**Making schema changes:**
+
+When you modify `prisma/schema.prisma`, create a new migration:
+
+```bash
+bun run db:migrate --name descriptive_name
+```
+
+This creates a new migration file in `prisma/migrations/`. Commit it to git. On the next Vercel deploy, `prisma migrate deploy` will apply it automatically.
+
+**Checking migration status:**
+
+```bash
+bun run db:status
+```
+
+This shows which migrations have been applied and which are pending.
 
 ## Production Deployment
 

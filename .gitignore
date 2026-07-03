@@ -54,7 +54,10 @@ server.log
 /skills/
 /skills/db/
 .zscripts/
-scripts/
+# Scripts directory — keep build.sh and init-db.sh tracked (essential for deployment)
+# but ignore generated test scripts
+scripts/*.png
+scripts/test-*
 db/*.db
 db/*.db-journal
 db/*.db-wal
