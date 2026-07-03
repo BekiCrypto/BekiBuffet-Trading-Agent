@@ -22,6 +22,9 @@ declare module "next-auth" {
       maxCapitalUsd?: number;
       riskLimitPct?: number;
       seats?: number;
+      // Admin + super admin fields
+      role?: string;
+      isSuperAdmin?: boolean;
     } & DefaultSession["user"];
   }
 
@@ -32,6 +35,7 @@ declare module "next-auth" {
     image?: string | null;
     password?: string | null;
     role?: string;
+    isSuperAdmin?: boolean;
   }
 }
 
@@ -49,5 +53,7 @@ declare module "next-auth/jwt" {
     maxCapitalUsd?: number;
     riskLimitPct?: number;
     seats?: number;
+    role?: string;
+    isSuperAdmin?: boolean;
   }
 }

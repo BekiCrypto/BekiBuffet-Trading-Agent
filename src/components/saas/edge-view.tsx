@@ -8,6 +8,8 @@ export function Edge() {
   const { setView } = useSaaS();
   const { data: session } = useSession();
   const enabled = (session?.user as any)?.edgeDiscoveryEnabled ?? false;
+  const isSuperAdmin = (session?.user as any)?.isSuperAdmin ?? false;
+  const hasAccess = enabled || isSuperAdmin;
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [edges, setEdges] = useState<any[]>([]);
@@ -34,7 +36,7 @@ export function Edge() {
     setRunning(false);
   };
 
-  if (!enabled) {
+  if (!hasAccess) {
     return (
       <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <div className="bb-panel p-8 text-center">

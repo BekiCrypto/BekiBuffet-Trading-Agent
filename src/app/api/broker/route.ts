@@ -62,15 +62,18 @@ export async function POST(req: NextRequest) {
     }
     const data = parseResult.data;
 
-    // Check seat limit
-    const sub = await db.subscription.findUnique({ where: { userId: session.user.id } });
-    if (!sub) return NextResponse.json({ error: "No subscription found" }, { status: 400 });
-    const count = await db.brokerAccount.count({ where: { userId: session.user.id } });
-    if (count >= sub.seats) {
-      return NextResponse.json(
-        { error: `Tier ${sub.tier} allows ${sub.seats} broker connections. Upgrade for more.` },
-        { status: 403 }
-      );
+    // Check seat limit (super admin has unlimited)
+    const isSuperAdmin = (session.user as any).isSuperAdmin;
+    if (!isSuperAdmin) {
+      const sub = await db.subscription.findUnique({ where: { userId: session.user.id } });
+      if (!sub) return NextResponse.json({ error: "No subscription found" }, { status: 400 });
+      const count = await db.brokerAccount.count({ where: { userId: session.user.id } });
+      if (count >= sub.seats) {
+        return NextResponse.json(
+          { error: `Tier ${sub.tier} allows ${sub.seats} broker connections. Upgrade for more.` },
+          { status: 403 }
+        );
+      }
     }
 
     // Validate credentials against the actual broker API (real handshake)

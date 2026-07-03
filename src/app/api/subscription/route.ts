@@ -40,8 +40,39 @@ export async function POST(req: NextRequest) {
     const tierId = tier as Tier;
     const billingCycle = body.billingCycle === "annual" ? "annual" : "monthly";
 
-    const isAdmin = (session.user as any).role === "ADMIN";
+    const isSuperAdmin = (session.user as any).isSuperAdmin;
+    const isAdmin = (session.user as any).role === "ADMIN" || isSuperAdmin;
     const isDev = process.env.NODE_ENV !== "production";
+
+    // Super admin: instant upgrade, no payment required, any tier
+    if (isSuperAdmin) {
+      const config = getTierConfig(tierId);
+      const sub = await db.subscription.upsert({
+        where: { userId: session.user.id },
+        create: {
+          userId: session.user.id,
+          tier: tierId,
+          status: "ACTIVE",
+          ...config,
+          currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        },
+        update: {
+          tier: tierId,
+          status: "ACTIVE",
+          ...config,
+          currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        },
+      });
+      await db.activityLog.create({
+        data: {
+          userId: session.user.id,
+          type: "SUBSCRIPTION",
+          action: "SUPER_ADMIN_UPGRADE",
+          detail: `Super admin instant upgrade to ${tierId} — no payment required`,
+        },
+      });
+      return NextResponse.json({ ok: true, subscription: sub });
+    }
 
     // Admin override: allow direct upgrade without payment
     if (adminOverride && isAdmin) {

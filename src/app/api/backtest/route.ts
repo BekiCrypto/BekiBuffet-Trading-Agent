@@ -41,13 +41,16 @@ export async function POST(req: NextRequest) {
     }
     const { name, asset, strategy, timeframe, startDate, endDate, initialCapital, parameters } = parseResult.data;
 
-    // Check credits
-    const sub = await db.subscription.findUnique({ where: { userId: session.user.id } });
-    if (!sub || sub.backtestCredits <= 0) {
-      return NextResponse.json(
-        { error: "No backtest credits remaining. Upgrade your plan." },
-        { status: 403 }
-      );
+    // Check credits (super admin has unlimited)
+    const isSuperAdmin = (session.user as any).isSuperAdmin;
+    if (!isSuperAdmin) {
+      const sub = await db.subscription.findUnique({ where: { userId: session.user.id } });
+      if (!sub || sub.backtestCredits <= 0) {
+        return NextResponse.json(
+          { error: "No backtest credits remaining. Upgrade your plan." },
+          { status: 403 }
+        );
+      }
     }
 
     // Create backtest record
@@ -68,11 +71,13 @@ export async function POST(req: NextRequest) {
       })
     ).id;
 
-    // Decrement credits
-    await db.subscription.update({
-      where: { userId: session.user.id },
-      data: { backtestCredits: { decrement: 1 } },
-    });
+    // Decrement credits (skip for super admin — unlimited)
+    if (!isSuperAdmin) {
+      await db.subscription.update({
+        where: { userId: session.user.id },
+        data: { backtestCredits: { decrement: 1 } },
+      });
+    }
 
     // Run backtest
     const result = runBacktest({

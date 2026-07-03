@@ -21,6 +21,7 @@ export function Dashboard() {
 
   const tier = (session?.user as any)?.tier ?? "FREE";
   const credits = (session?.user as any)?.backtestCredits ?? 0;
+  const isSuperAdmin = (session?.user as any)?.isSuperAdmin ?? false;
   const trialEnd = sub?.trialEndsAt ? new Date(sub.trialEndsAt) : null;
   const trialDaysLeft = trialEnd ? Math.max(0, Math.ceil((trialEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000))) : null;
 
@@ -40,8 +41,24 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Trial banner */}
-      {trialDaysLeft !== null && trialDaysLeft > 0 && (
+      {/* Super admin banner */}
+      {isSuperAdmin && (
+        <div className="bb-panel p-3 mb-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg, rgba(188, 140, 255, 0.12), rgba(248, 81, 73, 0.08))", borderColor: "rgba(188, 140, 255, 0.4)" }}>
+          <div className="flex items-center gap-2">
+            <span className="text-base">★</span>
+            <div>
+              <div className="text-sm font-bold" style={{ color: "var(--bb-purple)" }}>SUPER ADMIN ACCESS</div>
+              <div className="text-xs text-[var(--bb-muted)]">Full unrestricted access to all tiers, modules, features, and admin operations. No payment required.</div>
+            </div>
+          </div>
+          <button onClick={() => setView("admin")} className="text-xs font-bold px-3 py-1.5 rounded" style={{ background: "var(--bb-purple)", color: "#0a0e14" }}>
+            Admin Panel
+          </button>
+        </div>
+      )}
+
+      {/* Trial banner (hidden for super admin) */}
+      {!isSuperAdmin && trialDaysLeft !== null && trialDaysLeft > 0 && (
         <div className="bb-panel p-3 mb-4 flex items-center justify-between" style={{ background: "rgba(88, 166, 255, 0.08)", borderColor: "rgba(88, 166, 255, 0.3)" }}>
           <div className="flex items-center gap-2">
             <span className="text-base">✦</span>

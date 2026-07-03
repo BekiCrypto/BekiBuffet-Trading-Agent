@@ -10,6 +10,8 @@ export function AIAgent() {
   const { setView, activeAsset, setActiveAsset } = useSaaS();
   const { data: session } = useSession();
   const enabled = (session?.user as any)?.aiAgentEnabled ?? false;
+  const isSuperAdmin = (session?.user as any)?.isSuperAdmin ?? false;
+  const hasAccess = enabled || isSuperAdmin;
   const state = useBekiBuffet();
   const [loading, setLoading] = useState(false);
   const [decision, setDecision] = useState<any>(null);
@@ -186,7 +188,7 @@ export function AIAgent() {
     setLoading(false);
   };
 
-  if (!enabled) {
+  if (!hasAccess) {
     return (
       <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <div className="bb-panel p-8 text-center">

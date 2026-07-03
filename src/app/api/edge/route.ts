@@ -14,9 +14,12 @@ export async function POST() {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const sub = await db.subscription.findUnique({ where: { userId: session.user.id } });
-    if (!sub?.edgeDiscoveryEnabled) {
-      return NextResponse.json({ error: "Edge discovery requires Pro or higher" }, { status: 403 });
+    // Super admin bypasses all tier checks
+    if (!(session.user as any).isSuperAdmin) {
+      const sub = await db.subscription.findUnique({ where: { userId: session.user.id } });
+      if (!sub?.edgeDiscoveryEnabled) {
+        return NextResponse.json({ error: "Edge discovery requires Pro or higher" }, { status: 403 });
+      }
     }
 
     const result = runEdgeDiscovery(12);

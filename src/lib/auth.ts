@@ -9,11 +9,46 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { isSuperAdminEmail, SUPER_ADMIN_SUBSCRIPTION } from "@/lib/super-admin";
 
 // Auto-provision a default subscription for new users
-async function provisionDefaultSubscription(userId: string) {
+async function provisionDefaultSubscription(userId: string, email?: string) {
   const existing = await db.subscription.findUnique({ where: { userId } });
   if (existing) return;
+
+  // Super admin gets INSTITUTIONAL tier with everything unlocked
+  if (isSuperAdminEmail(email)) {
+    await db.subscription.create({
+      data: {
+        userId,
+        tier: "INSTITUTIONAL",
+        status: "ACTIVE",
+        seats: 999,
+        maxCapitalUsd: 1000000000,
+        riskLimitPct: 5.0,
+        backtestCredits: 999999,
+        aiAgentEnabled: true,
+        edgeDiscoveryEnabled: true,
+        currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+      },
+    });
+    // Also set role to ADMIN
+    await db.user.update({
+      where: { id: userId },
+      data: { role: "ADMIN" },
+    });
+    await db.activityLog.create({
+      data: {
+        userId,
+        type: "AUTH",
+        action: "SUPER_ADMIN_ACCESS",
+        detail: "Super admin signed in — full access granted",
+      },
+    });
+    return;
+  }
+
+  // Normal users get a 14-day Pro trial
   await db.subscription.create({
     data: {
       userId,
@@ -92,7 +127,7 @@ export const authOptions: NextAuthOptions = {
         // Resolve the actual DB user by email to ensure we have the correct id
         const dbUser = await db.user.findUnique({ where: { email: user.email.toLowerCase() } });
         if (dbUser) {
-          await provisionDefaultSubscription(dbUser.id);
+          await provisionDefaultSubscription(dbUser.id, dbUser.email);
         }
       }
       return true;
@@ -120,28 +155,50 @@ export const authOptions: NextAuthOptions = {
       }
       // Attach subscription tier to token for client-side gating
       if (token.id) {
-        const sub = await db.subscription.findUnique({
-          where: { userId: token.id as string },
-          select: {
-            tier: true,
-            status: true,
-            aiAgentEnabled: true,
-            edgeDiscoveryEnabled: true,
-            backtestCredits: true,
-            maxCapitalUsd: true,
-            riskLimitPct: true,
-            seats: true,
-          },
-        });
-        if (sub) {
-          token.tier = sub.tier;
-          token.subStatus = sub.status;
-          token.aiAgentEnabled = sub.aiAgentEnabled;
-          token.edgeDiscoveryEnabled = sub.edgeDiscoveryEnabled;
-          token.backtestCredits = sub.backtestCredits;
-          token.maxCapitalUsd = sub.maxCapitalUsd;
-          token.riskLimitPct = sub.riskLimitPct;
-          token.seats = sub.seats;
+        // SUPER ADMIN: Force INSTITUTIONAL tier with everything unlocked
+        if (isSuperAdminEmail(token.email as string)) {
+          token.tier = SUPER_ADMIN_SUBSCRIPTION.tier;
+          token.subStatus = SUPER_ADMIN_SUBSCRIPTION.status;
+          token.aiAgentEnabled = true;
+          token.edgeDiscoveryEnabled = true;
+          token.backtestCredits = SUPER_ADMIN_SUBSCRIPTION.backtestCredits;
+          token.maxCapitalUsd = SUPER_ADMIN_SUBSCRIPTION.maxCapitalUsd;
+          token.riskLimitPct = SUPER_ADMIN_SUBSCRIPTION.riskLimitPct;
+          token.seats = SUPER_ADMIN_SUBSCRIPTION.seats;
+          token.role = "ADMIN";
+          token.isSuperAdmin = true;
+        } else {
+          // Normal user: read from database
+          const sub = await db.subscription.findUnique({
+            where: { userId: token.id as string },
+            select: {
+              tier: true,
+              status: true,
+              aiAgentEnabled: true,
+              edgeDiscoveryEnabled: true,
+              backtestCredits: true,
+              maxCapitalUsd: true,
+              riskLimitPct: true,
+              seats: true,
+            },
+          });
+          if (sub) {
+            token.tier = sub.tier;
+            token.subStatus = sub.status;
+            token.aiAgentEnabled = sub.aiAgentEnabled;
+            token.edgeDiscoveryEnabled = sub.edgeDiscoveryEnabled;
+            token.backtestCredits = sub.backtestCredits;
+            token.maxCapitalUsd = sub.maxCapitalUsd;
+            token.riskLimitPct = sub.riskLimitPct;
+            token.seats = sub.seats;
+          }
+          // Check if user has ADMIN role
+          const dbUser = await db.user.findUnique({
+            where: { id: token.id as string },
+            select: { role: true },
+          });
+          token.role = dbUser?.role ?? "USER";
+          token.isSuperAdmin = false;
         }
       }
       return token;
@@ -149,6 +206,7 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) {
         (session.user as any).id = token.id;
+        (session.user as any).email = token.email;
         (session.user as any).tier = token.tier ?? "FREE";
         (session.user as any).subStatus = token.subStatus ?? "TRIALING";
         (session.user as any).aiAgentEnabled = token.aiAgentEnabled ?? false;
@@ -157,6 +215,8 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).maxCapitalUsd = token.maxCapitalUsd ?? 25000;
         (session.user as any).riskLimitPct = token.riskLimitPct ?? 1.0;
         (session.user as any).seats = token.seats ?? 1;
+        (session.user as any).role = token.role ?? "USER";
+        (session.user as any).isSuperAdmin = token.isSuperAdmin ?? false;
       }
       return session;
     },

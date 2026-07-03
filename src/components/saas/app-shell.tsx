@@ -31,6 +31,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const tier = (session?.user as any)?.tier ?? "FREE";
+  const isSuperAdmin = (session?.user as any)?.isSuperAdmin ?? false;
+  const isAdmin = (session?.user as any)?.role === "ADMIN" || isSuperAdmin;
 
   return (
     <div className="min-h-screen flex" style={{ background: "var(--bb-bg)", color: "var(--bb-text)" }}>
@@ -44,14 +46,17 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm" style={{ background: "linear-gradient(135deg, #58a6ff, #bc8cff)", color: "#0a0e14" }}>B</div>
             <div>
               <div className="text-sm font-bold">BekiBuffet</div>
-              <div className="text-[9px] text-[var(--bb-muted)] uppercase tracking-wider">{tier} Tier</div>
+              <div className="text-[9px] text-[var(--bb-muted)] uppercase tracking-wider">
+                {isSuperAdmin ? "★ SUPER ADMIN" : `${tier} Tier`}
+              </div>
             </div>
           </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto bb-scroll p-2">
           {NAV.map((item) => {
-            const locked = item.requiredTier && !item.requiredTier.includes(tier);
+            // Super admin bypasses all tier locks
+            const locked = !isSuperAdmin && item.requiredTier && !item.requiredTier.includes(tier);
             const isActive = view === item.view;
             return (
               <button
