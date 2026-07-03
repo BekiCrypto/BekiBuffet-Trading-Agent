@@ -407,12 +407,60 @@ Google OAuth is fully integrated and auto-detected. When configured, users see a
 
 **Without Google OAuth configured**, the app falls back to demo credentials login (`demo@bekibuffet.ai` / `bekibuffet`), which is auto-provisioned on first visit.
 
-### Stripe Integration (Optional)
+### Crypto Payments (USDT BEP-20)
 
-To collect real payments, integrate Stripe in `/api/subscription`:
-1. Set `STRIPE_SECRET_KEY` env var
-2. Replace the simulated upgrade logic with Stripe Checkout Sessions
-3. Add webhook handler at `/api/stripe/webhook` for subscription events
+BekiBuffet accepts subscription payments in **USDT on Binance Smart Chain (BEP-20)**. No Stripe, no credit cards — pure crypto.
+
+**Two payment modes (choose one):**
+
+#### Mode 1: NOWPayments Gateway (Recommended)
+
+Third-party payment processor that handles wallet generation, payment tracking, and webhooks automatically.
+
+1. Sign up at [https://nowpayments.io](https://nowpayments.io)
+2. Create an API key in the dashboard
+3. Set the IPN secret for webhook verification
+4. Configure the IPN callback URL to: `https://yourdomain.com/api/crypto/webhook`
+5. Set environment variables:
+   ```env
+   NOWPAYMENTS_API_KEY=your-api-key
+   NOWPAYMENTS_IPN_SECRET=your-ipn-secret
+   NOWPAYMENTS_API_URL=https://api.nowpayments.io
+   ```
+
+#### Mode 2: Direct Blockchain (Decentralized)
+
+Monitor BSC for incoming USDT transfers to your wallet. No third party.
+
+1. Generate a BSC wallet address (MetaMask, Trust Wallet, etc.)
+2. Set environment variables:
+   ```env
+   CRYPTO_RECEIVING_WALLET=0xYourWalletAddress
+   # Optional: custom RPC (defaults to public BSC endpoint)
+   BSC_RPC_URL=https://bsc-dataseed.binance.org
+   ```
+3. Users send USDT BEP-20 to your wallet address
+4. The system verifies transactions on-chain (12 confirmations required)
+5. Users can check payment status via `/api/crypto/verify`
+
+**How it works:**
+
+1. User clicks "Upgrade" → `POST /api/crypto/checkout` creates a payment request
+2. User sends USDT BEP-20 to the receiving address
+3. Payment is verified:
+   - NOWPayments mode: webhook confirms payment → `/api/crypto/webhook`
+   - Direct mode: user submits tx hash → `/api/crypto/verify` checks BSC
+4. Subscription activated automatically → email confirmation sent
+5. Payment recorded in `CryptoPayment` table with full audit trail
+
+**USDT BEP-20 Contract:** `0x55d398326f99059fF775485246999027B3197955`
+
+**Pricing:**
+| Tier | Monthly | Annual (2 months free) |
+|------|---------|------------------------|
+| Pro | 149 USDT | 1,490 USDT |
+| Elite | 499 USDT | 4,990 USDT |
+| Institutional | 2,500 USDT | 25,000 USDT |
 
 ## Risk Disclaimer
 

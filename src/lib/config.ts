@@ -84,19 +84,20 @@ export function validateProductionConfig(): StartupValidation {
   });
   if (isProd && !encryptionConfigured) errors.push("Encryption key is not configured — broker credentials cannot be securely stored");
 
-  // --- Stripe (required in production for paid tiers) ---
-  const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const stripeWebhook = process.env.STRIPE_WEBHOOK_SECRET;
-  const stripePrices = process.env.STRIPE_PRICE_PRO && process.env.STRIPE_PRICE_ELITE && process.env.STRIPE_PRICE_INSTITUTIONAL;
-  const stripeConfigured = !!(stripeKey && stripeWebhook && stripePrices);
+  // --- Crypto Payments (required in production for paid tiers) ---
+  const nowpaymentsKey = process.env.NOWPAYMENTS_API_KEY;
+  const cryptoWallet = process.env.CRYPTO_RECEIVING_WALLET;
+  const cryptoConfigured = !!(nowpaymentsKey || cryptoWallet);
   services.push({
-    name: "Stripe Billing",
-    configured: stripeConfigured,
+    name: "Crypto Payments (USDT BEP-20)",
+    configured: cryptoConfigured,
     required: isProd,
-    error: isProd && !stripeConfigured ? "STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and STRIPE_PRICE_* are required for billing" : undefined,
+    error: isProd && !cryptoConfigured
+      ? "NOWPAYMENTS_API_KEY or CRYPTO_RECEIVING_WALLET is required for billing"
+      : undefined,
   });
-  if (isProd && !stripeConfigured) {
-    warnings.push("Stripe is not configured — subscription upgrades will be blocked in production");
+  if (isProd && !cryptoConfigured) {
+    warnings.push("Crypto payments not configured — subscription upgrades will be blocked");
   }
 
   // --- Market Data (required in production) ---

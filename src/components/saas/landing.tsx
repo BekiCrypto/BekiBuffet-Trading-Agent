@@ -69,7 +69,7 @@ export function Landing() {
               </button>
             </div>
             <div className="mt-8 flex flex-wrap gap-6 text-xs text-[var(--bb-muted)]">
-              <div className="flex items-center gap-2"><CheckIcon /> No credit card required</div>
+              <div className="flex items-center gap-2"><CheckIcon /> No credit card — pay with USDT (BEP-20)</div>
               <div className="flex items-center gap-2"><CheckIcon /> Paper trading on day 1</div>
               <div className="flex items-center gap-2"><CheckIcon /> Cancel anytime</div>
               <div className="flex items-center gap-2"><CheckIcon /> SOC 2 type II in progress</div>
@@ -181,7 +181,7 @@ export function Landing() {
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-16">
         <div className="bb-panel p-8 md:p-12 text-center" style={{ background: "linear-gradient(135deg, rgba(88, 166, 255, 0.08), rgba(188, 140, 255, 0.08))", borderColor: "rgba(88, 166, 255, 0.3)" }}>
           <h2 className="text-2xl md:text-3xl font-bold mb-3">Stop babysitting charts.</h2>
-          <p className="text-[var(--bb-muted)] mb-6 max-w-xl mx-auto">Let BekiBuffet do the work. Start with a 14-day Pro trial — no credit card, no commitment, full feature access.</p>
+          <p className="text-[var(--bb-muted)] mb-6 max-w-xl mx-auto">Let BekiBuffet do the work. Start with a 14-day Pro trial — pay with USDT (BEP-20), no commitment, full feature access.</p>
           <button onClick={handleStart} className="text-base font-bold px-6 py-3 rounded-md transition-all hover:opacity-90" style={{ background: "linear-gradient(135deg, #58a6ff, #bc8cff)", color: "#0a0e14" }}>
             Start Free Trial
           </button>

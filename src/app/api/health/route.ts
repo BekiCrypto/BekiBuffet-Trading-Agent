@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { isRealMarketDataEnabled } from "@/lib/marketDataFeed";
-import { isStripeEnabled } from "@/lib/stripe";
+import { isCryptoPaymentEnabled, getCryptoPaymentMode } from "@/lib/crypto-payments";
 import { validateProductionConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 
@@ -28,10 +28,13 @@ export async function GET() {
     status: isRealMarketDataEnabled() ? "live" : (config.environment === "production" ? "error" : "simulator"),
   };
 
-  // Stripe check
-  checks.stripe = {
-    status: isStripeEnabled() ? "ok" : (config.environment === "production" ? "error" : "not_configured"),
+  // Crypto payment check
+  const cryptoMode = getCryptoPaymentMode();
+  checks.cryptoPayments = {
+    status: isCryptoPaymentEnabled() ? "ok" : (config.environment === "production" ? "error" : "not_configured"),
+    latency: undefined,
   };
+  (checks.cryptoPayments as any).mode = cryptoMode;
 
   // Google OAuth check
   checks.googleOAuth = {

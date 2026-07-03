@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isStripeEnabled, createCheckoutSession } from "@/lib/stripe";
+import { createCryptoPayment, isCryptoPaymentEnabled, getTierPrice } from "@/lib/crypto-payments";
 import { logger, sanitizeError } from "@/lib/logger";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { upgradeSubscriptionSchema } from "@/lib/validation";
@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     }
     const { tier, adminOverride } = parseResult.data;
     const tierId = tier as Tier;
+    const billingCycle = body.billingCycle === "annual" ? "annual" : "monthly";
 
     const isAdmin = (session.user as any).role === "ADMIN";
     const isDev = process.env.NODE_ENV !== "production";
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, subscription: sub });
     }
 
-    // Development mode: allow free upgrade (no Stripe needed)
+    // Development mode: allow free upgrade (no payment needed)
     if (isDev) {
       const config = getTierConfig(tierId);
       const sub = await db.subscription.upsert({
@@ -102,45 +103,47 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, subscription: sub });
     }
 
-    // Production: require Stripe Checkout
-    if (!isStripeEnabled()) {
+    // Downgrade to FREE = cancel subscription
+    if (tierId === "FREE") {
+      await db.subscription.update({
+        where: { userId: session.user.id },
+        data: { status: "CANCELED", tier: "FREE" },
+      });
+      await db.activityLog.create({
+        data: {
+          userId: session.user.id,
+          type: "SUBSCRIPTION",
+          action: "CANCELED",
+          detail: "Subscription canceled — downgraded to Free",
+        },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    // Production: require crypto payment (USDT BEP-20)
+    if (!isCryptoPaymentEnabled()) {
       return NextResponse.json(
-        { error: "Payment processing is not configured. Set STRIPE_SECRET_KEY." },
+        { error: "Crypto payments are not configured. Set NOWPAYMENTS_API_KEY or CRYPTO_RECEIVING_WALLET." },
         { status: 503 }
       );
     }
 
-    // Downgrade to FREE = cancel subscription
-    if (tierId === "FREE") {
-      const { cancelSubscription } = await import("@/lib/stripe");
-      const result = await cancelSubscription(session.user.id);
-      if (!result.ok) {
-        return NextResponse.json({ error: result.error }, { status: 400 });
-      }
-      return NextResponse.json({ ok: true });
-    }
-
-    // Upgrade: create Stripe Checkout Session
-    const origin = req.headers.get("origin") || "http://localhost:3000";
-    const checkoutResult = await createCheckoutSession(
+    // Create crypto payment
+    const payment = await createCryptoPayment(
       session.user.id,
       session.user.email!,
       tierId,
-      `${origin}/?upgrade=success`,
-      `${origin}/?upgrade=canceled`
+      billingCycle
     );
 
-    if (checkoutResult.error || !checkoutResult.url) {
-      return NextResponse.json(
-        { error: checkoutResult.error || "Failed to create checkout session" },
-        { status: 400 }
-      );
+    if (payment.error) {
+      return NextResponse.json({ error: payment.error }, { status: 400 });
     }
 
     return NextResponse.json({
       ok: true,
-      checkoutUrl: checkoutResult.url,
-      message: "Redirecting to Stripe Checkout...",
+      payment,
+      message: `Send ${payment.amountUsdt} USDT (BEP-20) to activate ${tierId}`,
     });
   } catch (e: any) {
     logger.error("Subscription upgrade failed", { userId: session.user.id, error: e.message });

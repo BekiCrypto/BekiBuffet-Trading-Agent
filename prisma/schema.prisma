@@ -40,6 +40,7 @@ model User {
   trades         Trade[]
   aiDecisions    AIDecision[]
   activityLog    ActivityLog[]
+  payments       CryptoPayment[]
 
   @@index([email])
 }
@@ -90,8 +91,10 @@ model Subscription {
   userId               String    @unique
   tier                 String    @default("FREE") // FREE | PRO | ELITE | INSTITUTIONAL
   status               String    @default("ACTIVE") // ACTIVE | PAST_DUE | CANCELED | TRIALING
-  stripeCustomerId     String?
-  stripeSubId          String?
+  // Crypto payment fields (USDT BEP-20)
+  walletAddress        String?   // user's deposit address for payments
+  paymentId            String?   // NOWPayments payment ID
+  lastPaymentTxHash    String?   // blockchain tx hash of last payment
   currentPeriodEnd     DateTime?
   trialEndsAt          DateTime?
   seats                Int       @default(1) // number of broker accounts allowed
@@ -103,11 +106,41 @@ model Subscription {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
   user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments             CryptoPayment[]
 }
 
 // ----------------------------------------------------------------------------
-// Broker Connections
+// Crypto Payments (USDT BEP-20)
 // ----------------------------------------------------------------------------
+
+model CryptoPayment {
+  id              String   @id @default(cuid())
+  userId          String
+  subscriptionId  String?
+  tier            String   // PRO | ELITE | INSTITUTIONAL
+  amount          Float    // USD amount
+  amountUsdt      Float    // USDT amount (6 decimals)
+  currency        String   @default("USDT")
+  network         String   @default("BSC") // BEP-20
+  status          String   @default("PENDING") // PENDING | CONFIRMED | FAILED | EXPIRED
+  txHash          String?  // blockchain transaction hash
+  fromAddress     String?  // sender wallet address
+  toAddress       String?  // receiving wallet address
+  paymentId       String?  // NOWPayments payment ID (if using gateway)
+  confirmations   Int      @default(0)
+  blockNumber     BigInt?
+  createdAt       DateTime @default(now())
+  confirmedAt     DateTime?
+  expiresAt       DateTime?
+
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([txHash])
+}
+
 
 model BrokerAccount {
   id           String    @id @default(cuid())
