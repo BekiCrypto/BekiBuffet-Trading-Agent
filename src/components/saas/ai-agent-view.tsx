@@ -119,16 +119,44 @@ export function AIAgent() {
   const askReview = async () => {
     setLoading(true);
     setError(null);
+
+    // Calculate real performance metrics from closed trades
+    const trades = state.closedTrades;
+    const wins = trades.filter(t => t.pnl > 0);
+    const losses = trades.filter(t => t.pnl < 0);
+    const grossProfit = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+
+    // Calculate real max drawdown from equity curve
+    let peak = 100000; // starting equity
+    let maxDD = 0;
+    let runningPnl = 0;
+    for (const t of trades) {
+      runningPnl += t.pnl;
+      const equity = 100000 + runningPnl;
+      if (equity > peak) peak = equity;
+      const dd = ((peak - equity) / peak) * 100;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    // Calculate Sharpe ratio from trade returns
+    const returns = trades.length > 1
+      ? trades.map(t => t.pnlPct / 100)
+      : [0];
+    const meanReturn = returns.reduce((a, b) => a + b, 0) / (returns.length || 1);
+    const stdReturn = returns.length > 1
+      ? Math.sqrt(returns.reduce((a, b) => a + (b - meanReturn) ** 2, 0) / (returns.length - 1))
+      : 0;
+    const sharpe = stdReturn === 0 ? 0 : (meanReturn / stdReturn) * Math.sqrt(252);
+
     const reviewStats = {
-      totalTrades: state.closedTrades.length,
-      winRate: state.closedTrades.length > 0
-        ? (state.closedTrades.filter(t => t.pnl > 0).length / state.closedTrades.length) * 100
-        : 0,
-      totalPnl: state.closedTrades.reduce((s, t) => s + t.pnl, 0),
-      sharpeRatio: 1.5,
-      maxDrawdown: 5,
-      profitFactor: 1.4,
-      byAsset: state.closedTrades.reduce((acc: any, t) => {
+      totalTrades: trades.length,
+      winRate: trades.length > 0 ? (wins.length / trades.length) * 100 : 0,
+      totalPnl: trades.reduce((s, t) => s + t.pnl, 0),
+      sharpeRatio: sharpe,
+      maxDrawdown: maxDD,
+      profitFactor: grossLoss === 0 ? (grossProfit > 0 ? 99 : 0) : grossProfit / grossLoss,
+      byAsset: trades.reduce((acc: any, t) => {
         const a = acc[t.asset] ?? { trades: 0, pnl: 0, winRate: 0 };
         a.trades++;
         a.pnl += t.pnl;
