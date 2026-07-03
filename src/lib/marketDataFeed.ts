@@ -2,16 +2,17 @@
 // BekiBuffet SaaS — Real Market Data Provider (TwelveData API)
 // ============================================================================
 // Fetches real-time prices and historical OHLC candles from TwelveData.
-// Falls back to the built-in simulator if TWELVEDATA_API_KEY is not set
-// (clearly logged as simulation mode).
 //
-// TwelveData supports: XAUUSD, EURUSD, GBPUSD, EURJPY, BTCUSD
-// Free tier: 8 requests/minute, 800/day — sufficient for polling.
-// For higher volume, upgrade or use WebSocket streaming.
+// PRODUCTION BEHAVIOR:
+//   - If TWELVEDATA_API_KEY is not set in production → throws an error
+//   - No simulator fallback in production — every price is from the live API
+//
+// DEVELOPMENT BEHAVIOR:
+//   - If TWELVEDATA_API_KEY is not set → falls back to built-in simulator
+//   - Clearly logs "SIMULATOR MODE" so devs know data is synthetic
 // ============================================================================
 
 import type { AssetSymbol, Candle, Timeframe } from "./trading/types";
-import { ASSET_PRESETS } from "./trading/presets";
 import { logger } from "./logger";
 
 const TWELVEDATA_BASE = "https://api.twelvedata.com";
@@ -23,12 +24,33 @@ const TF_TO_INTERVAL: Record<Timeframe, string> = {
   H4: "4h",
 };
 
-const TF_TO_MINUTES: Record<Timeframe, number> = {
-  M5: 5,
-  M15: 15,
-  H1: 60,
-  H4: 240,
-};
+/**
+ * Retry wrapper with exponential backoff.
+ * Retries transient failures (network errors, 429, 5xx).
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 500
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastError = e;
+      if (attempt === maxRetries) break;
+      // Don't retry on 4xx errors (except 429)
+      if (e.message?.includes("400") || e.message?.includes("401") || e.message?.includes("403")) {
+        break;
+      }
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      logger.warn("Retrying market data fetch", { attempt: attempt + 1, delay, error: e.message });
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
 
 export interface MarketDataPrice {
   asset: AssetSymbol;
@@ -52,54 +74,72 @@ export function isRealMarketDataEnabled(): boolean {
 }
 
 /**
+ * In production, throw if market data is not configured.
+ * In development, allow simulator fallback.
+ */
+function requireMarketDataOrFallback(): boolean {
+  if (isRealMarketDataEnabled()) return true;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Market data is not configured. Set TWELVEDATA_API_KEY environment variable. " +
+        "Live trading terminal is disabled until market data is available."
+    );
+  }
+  logger.warn("TWELVEDATA_API_KEY not set — using SIMULATOR MODE (development only)");
+  return false;
+}
+
+/**
+ * Get simulator price (development only).
+ */
+async function getSimulatorPrice(asset: AssetSymbol): Promise<MarketDataPrice> {
+  const { getCurrentPrice } = await import("./trading/marketData");
+  return {
+    asset,
+    price: getCurrentPrice(asset),
+    timestamp: Date.now(),
+    source: "simulator",
+  };
+}
+
+/**
  * Get the current real-time price for an asset.
- * Falls back to simulator if API key is not set.
+ * PRODUCTION: Throws if TWELVEDATA_API_KEY is not set.
+ * DEVELOPMENT: Falls back to simulator.
  */
 export async function getRealtimePrice(asset: AssetSymbol): Promise<MarketDataPrice> {
-  const apiKey = process.env.TWELVEDATA_API_KEY;
-
-  if (!apiKey || apiKey.length < 10) {
-    // Fallback to simulator
-    const { getCurrentPrice } = await import("./trading/marketData");
-    return {
-      asset,
-      price: getCurrentPrice(asset),
-      timestamp: Date.now(),
-      source: "simulator",
-    };
+  if (!requireMarketDataOrFallback()) {
+    return getSimulatorPrice(asset);
   }
 
+  const apiKey = process.env.TWELVEDATA_API_KEY!;
   try {
-    const symbol = asset;
-    const resp = await fetch(`${TWELVEDATA_BASE}/price?symbol=${symbol}&apikey=${apiKey}`, {
-      headers: { Accept: "application/json" },
+    return await withRetry(async () => {
+      const resp = await fetch(`${TWELVEDATA_BASE}/price?symbol=${asset}&apikey=${apiKey}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+
+      if (!resp.ok) {
+        throw new Error(`TwelveData API error: ${resp.status}`);
+      }
+
+      const data = await resp.json();
+
+      if (data.status === "error") {
+        throw new Error(data.message || "TwelveData API returned error");
+      }
+
+      return {
+        asset,
+        price: parseFloat(data.price),
+        timestamp: Date.now(),
+        source: "twelvedata" as const,
+      };
     });
-
-    if (!resp.ok) {
-      throw new Error(`TwelveData API error: ${resp.status}`);
-    }
-
-    const data = await resp.json();
-
-    if (data.status === "error") {
-      throw new Error(data.message || "TwelveData API returned error");
-    }
-
-    return {
-      asset,
-      price: parseFloat(data.price),
-      timestamp: Date.now(),
-      source: "twelvedata",
-    };
   } catch (e: any) {
-    logger.warn("TwelveData price fetch failed, using simulator", { asset, error: e.message });
-    const { getCurrentPrice } = await import("./trading/marketData");
-    return {
-      asset,
-      price: getCurrentPrice(asset),
-      timestamp: Date.now(),
-      source: "simulator",
-    };
+    logger.error("TwelveData price fetch failed after retries", { asset, error: e.message });
+    throw new Error(`Failed to fetch real-time price for ${asset}: ${e.message}`);
   }
 }
 
@@ -107,9 +147,7 @@ export async function getRealtimePrice(asset: AssetSymbol): Promise<MarketDataPr
  * Get real-time prices for multiple assets in a single API call.
  */
 export async function getRealtimePrices(assets: AssetSymbol[]): Promise<MarketDataPrice[]> {
-  const apiKey = process.env.TWELVEDATA_API_KEY;
-
-  if (!apiKey || apiKey.length < 10) {
+  if (!requireMarketDataOrFallback()) {
     const { getCurrentPrice } = await import("./trading/marketData");
     return assets.map((asset) => ({
       asset,
@@ -119,76 +157,51 @@ export async function getRealtimePrices(assets: AssetSymbol[]): Promise<MarketDa
     }));
   }
 
+  const apiKey = process.env.TWELVEDATA_API_KEY!;
+
   try {
+    // TwelveData supports batch quotes
     const symbols = assets.join(",");
     const resp = await fetch(
-      `${TWELVEDATA_BASE}/price?symbol=${symbols}&apikey=${apiKey}`,
-      { headers: { Accept: "application/json" } }
+      `${TWELVEDATA_BASE}/quote?symbol=${symbols}&apikey=${apiKey}`,
+      { headers: { Accept: "application/json" }, cache: "no-store" }
     );
 
     if (!resp.ok) throw new Error(`TwelveData API error: ${resp.status}`);
 
     const data = await resp.json();
 
-    // Single symbol returns {price, ...}, multiple returns {symbol: {price}, ...}
-    if (assets.length === 1) {
-      if (data.status === "error") throw new Error(data.message);
-      return [{
-        asset: assets[0],
-        price: parseFloat(data.price),
-        timestamp: Date.now(),
-        source: "twelvedata",
-      }];
-    }
+    // Single symbol returns an object, multiple returns array
+    const results = Array.isArray(data) ? data : [data];
 
-    // Use Promise.all with async map for fallback imports
-    const results = await Promise.all(
-      assets.map(async (asset) => {
-        const entry = data[asset];
-        if (entry && entry.price) {
-          return {
-            asset,
-            price: parseFloat(entry.price),
-            timestamp: Date.now(),
-            source: "twelvedata" as const,
-          };
-        }
-        // Fallback per-asset
-        const { getCurrentPrice } = await import("./trading/marketData");
+    return assets.map((asset, idx) => {
+      const entry = results[idx];
+      if (entry && entry.close) {
         return {
           asset,
-          price: getCurrentPrice(asset),
+          price: parseFloat(entry.close),
           timestamp: Date.now(),
-          source: "simulator" as const,
+          source: "twelvedata" as const,
         };
-      })
-    );
-    return results;
+      }
+      throw new Error(`No price data for ${asset}`);
+    });
   } catch (e: any) {
-    logger.warn("TwelveData batch price fetch failed, using simulator", { error: e.message });
-    const { getCurrentPrice } = await import("./trading/marketData");
-    return assets.map((asset) => ({
-      asset,
-      price: getCurrentPrice(asset),
-      timestamp: Date.now(),
-      source: "simulator" as const,
-    }));
+    logger.error("TwelveData batch price fetch failed", { error: e.message });
+    throw new Error(`Failed to fetch real-time prices: ${e.message}`);
   }
 }
 
 /**
  * Get historical OHLC candles for an asset from TwelveData.
- * Falls back to simulator if API key is not set.
+ * PRODUCTION: Throws if TWELVEDATA_API_KEY is not set.
  */
 export async function getHistoricalCandles(
   asset: AssetSymbol,
   timeframe: Timeframe,
   outputsize: number = 200
 ): Promise<MarketDataCandles> {
-  const apiKey = process.env.TWELVEDATA_API_KEY;
-
-  if (!apiKey || apiKey.length < 10) {
-    // Fallback to simulator
+  if (!requireMarketDataOrFallback()) {
     const { getCandles } = await import("./trading/marketData");
     return {
       asset,
@@ -198,11 +211,13 @@ export async function getHistoricalCandles(
     };
   }
 
+  const apiKey = process.env.TWELVEDATA_API_KEY!;
+
   try {
     const interval = TF_TO_INTERVAL[timeframe];
     const resp = await fetch(
       `${TWELVEDATA_BASE}/time_series?symbol=${asset}&interval=${interval}&outputsize=${outputsize}&apikey=${apiKey}`,
-      { headers: { Accept: "application/json" } }
+      { headers: { Accept: "application/json" }, cache: "no-store" }
     );
 
     if (!resp.ok) throw new Error(`TwelveData API error: ${resp.status}`);
@@ -232,24 +247,16 @@ export async function getHistoricalCandles(
       source: "twelvedata",
     };
   } catch (e: any) {
-    logger.warn("TwelveData candle fetch failed, using simulator", { asset, timeframe, error: e.message });
-    const { getCandles } = await import("./trading/marketData");
-    return {
-      asset,
-      timeframe,
-      candles: getCandles(asset)[timeframe],
-      source: "simulator",
-    };
+    logger.error("TwelveData candle fetch failed", { asset, timeframe, error: e.message });
+    throw new Error(`Failed to fetch historical candles for ${asset}: ${e.message}`);
   }
 }
 
 /**
  * Get the current spread (in pips) for an asset.
- * Uses TwelveData bid/ask if available, otherwise estimates from ATR.
+ * Uses realistic broker spreads.
  */
 export async function getSpread(asset: AssetSymbol): Promise<number> {
-  const preset = ASSET_PRESETS[asset];
-  // Base spreads (in pips) — realistic for major brokers
   const baseSpreads: Record<AssetSymbol, number> = {
     XAUUSD: 25,
     EURUSD: 0.8,

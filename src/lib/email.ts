@@ -188,34 +188,68 @@ export async function sendEmail(message: EmailMessage): Promise<boolean> {
     return false;
   }
 
-  try {
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: process.env.FROM_EMAIL || "BekiBuffet <noreply@bekibuffet.ai>",
-        to: message.to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
-      }),
-    });
+  // Retry logic with exponential backoff
+  const maxRetries = 3;
+  const baseDelayMs = 1000;
 
-    if (!resp.ok) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: process.env.FROM_EMAIL || "BekiBuffet <noreply@bekibuffet.ai>",
+          to: message.to,
+          subject: message.subject,
+          html: message.html,
+          text: message.text,
+        }),
+      });
+
+      if (resp.ok) {
+        logger.info("Email sent", { to: message.to, subject: message.subject, attempt });
+        return true;
+      }
+
+      // Don't retry on 4xx (client errors)
+      if (resp.status >= 400 && resp.status < 500) {
+        const err = await resp.text();
+        logger.error("Resend API client error (not retrying)", {
+          status: resp.status,
+          error: err,
+          to: message.to,
+        });
+        return false;
+      }
+
+      // 5xx errors — retry
       const err = await resp.text();
-      logger.error("Resend API error", { status: resp.status, error: err });
-      return false;
-    }
+      logger.warn("Resend API server error (retrying)", {
+        status: resp.status,
+        error: err,
+        attempt: attempt + 1,
+      });
 
-    logger.info("Email sent", { to: message.to, subject: message.subject });
-    return true;
-  } catch (e: any) {
-    logger.error("Failed to send email", { error: e.message, to: message.to });
-    return false;
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * Math.pow(2, attempt)));
+      }
+    } catch (e: any) {
+      logger.warn("Email send failed (retrying)", {
+        error: e.message,
+        attempt: attempt + 1,
+        to: message.to,
+      });
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * Math.pow(2, attempt)));
+      }
+    }
   }
+
+  logger.error("Email send failed after all retries", { to: message.to, subject: message.subject });
+  return false;
 }
 
 /**
