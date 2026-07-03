@@ -89,3 +89,63 @@ Stage Summary:
 - Do-Not-Trade engine demonstrably blocking poor trades as designed
 - Responsive on mobile and desktop, sticky footer working
 - Ready for user delivery
+
+---
+Task ID: bekibuffet-saas
+Agent: main (Super Z)
+Task: Evolve BekiBuffet into a full SaaS autonomous AI trading system with Google OAuth, subscription tiers, broker connections, backtesting, edge discovery, LLM-powered AI agent, and multi-user support.
+
+Work Log:
+- Installed: next-auth@4, @auth/prisma-adapter, bcryptjs
+- Built Prisma schema (12 models): User, Account, Session, VerificationToken, Subscription, BrokerAccount, Backtest, EdgeProfile, AgentState, Trade, AIDecision, ActivityLog
+- Pushed schema to SQLite database
+- Built NextAuth config (src/lib/auth.ts): Google OAuth + Credentials providers, Prisma adapter, JWT session, auto-provision 14-day Pro trial on first sign-in
+- Added NEXTAUTH_URL and NEXTAUTH_SECRET to .env
+- Built SaaS types (src/lib/saas.ts): 4 tiers (Free/Pro/Elite/Institutional), 5 broker adapters (MT5/OANDA/Binance/IB/Demo), view routing types
+- Built server actions (src/lib/saas-actions.ts): signUpDemo, upgradeSubscription, cancelSubscription, connectBroker, disconnectBroker, getAgentState, upsertAgentState, getActivityLog, startBacktest, startEdgeDiscovery
+- Built API routes: /api/auth/[...nextauth], /api/subscription, /api/broker, /api/backtest, /api/edge, /api/agent, /api/ai-decision, /api/seed
+- Built SaaS provider (src/components/saas/saas-provider.tsx): auth-aware view routing with derived state (no effects)
+- Built AppShell (src/components/saas/app-shell.tsx): sidebar nav with 9 sections, tier-gated features, mobile responsive
+- Built Landing page: hero, stats strip, 9-module architecture grid, 4-step process, pricing with monthly/annual toggle, CTA, footer
+- Built SignIn page: Google OAuth button + demo credentials form, auto-provisions demo account
+- Built Dashboard: trial banner, 4 stat cards, 4 quick actions, recent decisions, asset overview, connected brokers
+- Built Brokers view: 5 broker adapters with dynamic forms, connected accounts with disconnect
+- Built Backtest view: 4 strategies, 5 assets, 2 timeframes, advanced parameter overrides, equity curve SVG, trade distribution, exit reason breakdown, history
+- Built Edge Discovery view: autonomous parameter search across 240 configs, walk-forward validation, best edge highlight, all candidates table, saved edges
+- Built AI Agent view: current context panel, AI decision panel with confidence, contributing factors with influence bars, risk adjustment, self-learning insight, strategy review
+- Built Subscription view: current plan card, 4 tier cards with monthly/annual toggle, upgrade/downgrade/cancel
+- Built Settings view: profile, notification toggles, security options, activity log, danger zone
+- Built Admin/Telemetry view: 8 stat cards, self-learning module snapshot, equity protection, adjustment log
+- Built Terminal (SaaS-wrapped): integrated existing BekiBuffet engine inside SaaS shell with sidebar
+- Built Backtesting engine (src/lib/trading/backtest.ts): historical candle generator, strategy runner with overrides, equity curve, full performance metrics (Sharpe, PF, win rate, MFE/MAE, trade distribution)
+- Built Edge Discovery module (src/lib/trading/edgeDiscovery.ts): autonomous parameter search across 5 assets × 2 timeframes × 4 strategies × 6 parameter sets = 240 configs, walk-forward validation (in-sample vs out-of-sample), composite scoring, DEPLOY/WATCH/REJECT recommendations
+- Built AI Agent Decision Layer (src/lib/trading/aiAgent.ts): LLM-powered meta-decisioning using z-ai-web-dev-sdk, structured JSON output with decision/direction/confidence/reasoning/factors/risk-adjustment/insight, strategy review mode
+- Refactored ai-decision API to accept client-side context (fixed server-side state issue)
+- Updated page.tsx: SaaS provider wraps view router (landing/signin/app-shell with all views)
+- Updated layout.tsx: new SaaS metadata, removed Toaster
+- Added demo seed route: provisions demo@bekibuffet.ai with Elite tier + paper broker
+
+Verification (Agent Browser):
+- Landing page renders with hero, architecture grid, pricing
+- Clicked "Get Started" → sign-in page auto-provisioned demo account
+- Signed in → dashboard with $100k equity, 1000 backtest credits, Elite tier
+- Navigated to Live Terminal → agent started, asset cards with live confluence scores
+- Navigated to AI Agent → clicked "Ask AI Agent" → LLM returned structured REJECT decision at 75% confidence with 5 contributing factors and self-learning insight
+- Navigated to Backtesting → ran XAUUSD BekiBuffet V1 → 7 trades, equity curve, full metrics rendered
+- Navigated to Edge Discovery → ran discovery → found 5 validated edges (best: GBPUSD H1 Ichimoku Breakout 75% WR, PF 3.06)
+- Navigated to Brokers → demo paper account shown as connected
+- Navigated to Subscription → Elite tier active, upgrade/downgrade options
+- Mobile responsive at 375×812
+- ESLint clean, no console errors
+
+Stage Summary:
+- Complete SaaS autonomous AI trading system delivered
+- Google OAuth + demo credentials authentication (works without Google creds via auto-provisioned demo)
+- 4 subscription tiers with feature gating (Free/Pro/Elite/Institutional)
+- 5 broker adapters (MT5/OANDA/Binance/IB/Demo) with dynamic connection forms
+- Backtesting engine with 4 strategies, equity curves, full performance metrics
+- Edge discovery autonomously searches 240 configs with walk-forward validation
+- LLM-powered AI agent produces structured trading decisions with reasoning, factors, and self-learning insights
+- All 9 modules from original spec preserved and integrated
+- Multi-user with Prisma persistence (users, subscriptions, brokers, backtests, edges, trades, AI decisions, activity log)
+- Mobile responsive, ESLint clean, no console errors

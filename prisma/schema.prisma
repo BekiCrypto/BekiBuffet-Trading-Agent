@@ -1,8 +1,8 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ============================================================================
+// BekiBuffet SaaS — Prisma Schema
+// Multi-tenant autonomous trading agent system with subscriptions,
+// broker connections, backtests, edge profiles, and AI agent state.
+// ============================================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -13,20 +13,272 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ----------------------------------------------------------------------------
+// Auth (NextAuth.js core models)
+// ----------------------------------------------------------------------------
+
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  password      String? // for demo credentials login
+  role          String    @default("USER") // USER | ADMIN
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  subscription   Subscription?
+  brokerAccounts BrokerAccount[]
+  backtests      Backtest[]
+  edgeProfiles   EdgeProfile[]
+  agentStates    AgentState[]
+  trades         Trade[]
+  aiDecisions    AIDecision[]
+  activityLog    ActivityLog[]
 }
 
-model Post {
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String // google | credentials
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ----------------------------------------------------------------------------
+// Subscription System
+// ----------------------------------------------------------------------------
+
+model Subscription {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  tier               String   @default("FREE") // FREE | PRO | ELITE | INSTITUTIONAL
+  status             String   @default("ACTIVE") // ACTIVE | PAST_DUE | CANCELED | TRIALING
+  stripeCustomerId   String?
+  stripeSubId        String?
+  currentPeriodEnd   DateTime?
+  trialEndsAt        DateTime?
+  seats              Int      @default(1) // number of broker accounts allowed
+  maxCapitalUsd      Int      @default(25000) // max AUM managed
+  riskLimitPct       Float    @default(1.0) // max risk per trade
+  backtestCredits    Int      @default(50) // monthly backtest runs
+  aiAgentEnabled     Boolean  @default(false)
+  edgeDiscoveryEnabled Boolean @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ----------------------------------------------------------------------------
+// Broker Connections
+// ----------------------------------------------------------------------------
+
+model BrokerAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  brokerType    String   // MT5 | OANDA | BINANCE | INTERACTIVE_BROKERS | DEMO
+  accountName   String
+  accountId     String
+  apiKey        String?  // encrypted at app layer
+  apiSecret     String?  // encrypted at app layer
+  server        String?  // for MT5
+  leverage      Float    @default(100)
+  baseCurrency  String   @default("USD")
+  balance       Float    @default(0)
+  equity        Float    @default(0)
+  currency      String   @default("USD")
+  isConnected   Boolean  @default(false)
+  lastSyncAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades        Trade[]
+}
+
+// ----------------------------------------------------------------------------
+// Backtesting
+// ----------------------------------------------------------------------------
+
+model Backtest {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  asset         String   // XAUUSD | EURUSD | ...
+  strategy      String   // BEKIBUFFET_V1 | ICHIMOKU_CLOUD | MOMENTUM_BREAKOUT | ...
+  timeframe     String   // M5 | M15 | H1 | H4
+  startDate     DateTime
+  endDate       DateTime
+  initialCapital Float   @default(10000)
+  parameters    String   // JSON string
+  status        String   @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED
+  // Results
+  finalEquity   Float?
+  totalReturn   Float?
+  maxDrawdown   Float?
+  sharpeRatio   Float?
+  winRate       Float?
+  profitFactor  Float?
+  totalTrades   Int?
+  avgWinUsd     Float?
+  avgLossUsd    Float?
+  equityCurve   String?  // JSON array of {t, equity}
+  tradesJson    String?  // JSON array of trades
+  duration      Int?     // ms
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ----------------------------------------------------------------------------
+// Edge Discovery — autonomous parameter search
+// ----------------------------------------------------------------------------
+
+model EdgeProfile {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  asset           String
+  description     String
+  // Best parameters found
+  parameters      String   // JSON
+  // Performance metrics from walk-forward
+  winRate         Float
+  profitFactor    Float
+  sharpeRatio     Float
+  maxDrawdown     Float
+  totalTrades     Int
+  avgRoiPerTrade  Float
+  // Validation
+  walkForwardScore Float   // 0-100
+  inSampleScore   Float
+  outOfSampleScore Float
+  // Status
+  status          String   @default("DISCOVERED") // DISCOVERED | VALIDATED | DEPLOYED | RETIRED
+  deployedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ----------------------------------------------------------------------------
+// Per-user Agent State (persisted BekiBuffet state)
+// ----------------------------------------------------------------------------
+
+model AgentState {
+  id              String   @id @default(cuid())
+  userId          String
+  brokerAccountId String?  // null = paper trading
+  mode            String   @default("PAUSED") // PAUSED | RUNNING | HALTED
+  equity          Float    @default(10000)
+  balance         Float    @default(10000)
+  floatingPnl     Float    @default(0)
+  dayStartEquity  Float    @default(10000)
+  consecutiveLosses Int    @default(0)
+  ticksProcessed  Int      @default(0)
+  decisionsTaken  Int      @default(0)
+  decisionsRejected Int    @default(0)
+  decisionsWaiting Int     @default(0)
+  campaignsActive Int      @default(0)
+  selfLearningJson String? // self-learning state serialized
+  activeAssets    String?  // JSON array of asset symbols
+  lastTickAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, brokerAccountId])
+}
+
+// ----------------------------------------------------------------------------
+// Trades (live + paper)
+// ----------------------------------------------------------------------------
+
+model Trade {
+  id              String   @id @default(cuid())
+  userId          String
+  brokerAccountId String?
+  asset           String
+  direction       String   // LONG | SHORT
+  size            Float
+  entryPrice      Float
+  exitPrice       Float?
+  stopLoss        Float
+  takeProfit      Float
+  status          String   @default("OPEN") // OPEN | CLOSED
+  pnl             Float?
+  pnlPct          Float?
+  mfe             Float?
+  mae             Float?
+  entryScore      Int
+  marketRegime    String?
+  ichimokuState   String?
+  priceActionPattern String?
+  exitReason      String?
+  openTime        DateTime @default(now())
+  closeTime       DateTime?
+  duration        Int?     // ms
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerAccount   BrokerAccount? @relation(fields: [brokerAccountId], references: [id])
+}
+
+// ----------------------------------------------------------------------------
+// AI Agent Decisions — LLM-powered meta-decisions
+// ----------------------------------------------------------------------------
+
+model AIDecision {
+  id          String   @id @default(cuid())
+  userId      String
+  asset       String
+  decision    String   // OPEN | SCALE | CLOSE | REJECT | REBALANCE | HEDGE
+  reasoning   String   // LLM-generated reasoning
+  confidence  Float    // 0-1
+  factors     String?  // JSON of contributing factors
+  actioned    Boolean  @default(false) // whether the trade desk executed it
+  pnl         Float?   // realized pnl if actioned and closed
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ----------------------------------------------------------------------------
+// Activity Log (audit trail)
+// ----------------------------------------------------------------------------
+
+model ActivityLog {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  userId    String
+  type      String   // AUTH | SUBSCRIPTION | BROKER | TRADE | BACKTEST | EDGE | AGENT
+  action    String
+  detail    String?
+  meta      String?  // JSON
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
