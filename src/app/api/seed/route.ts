@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 // Provision a demo user with Elite tier if none exists.
 // SECURITY: Only allowed in non-production environments OR when a valid SETUP_TOKEN
 // is provided via the X-Setup-Token header. This prevents unauthorized admin provisioning.

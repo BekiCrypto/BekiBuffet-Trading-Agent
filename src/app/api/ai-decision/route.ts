@@ -6,6 +6,7 @@ import { generateAIDecision, generateStrategyReview, type AIAgentContext } from 
 import type { AssetSymbol, ConfluenceScore, IchimokuReading, MarketRegime, MarketStructureReading, PriceActionReading, RiskState, Campaign } from "@/lib/trading/types";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {

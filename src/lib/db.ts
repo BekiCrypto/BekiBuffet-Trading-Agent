@@ -4,34 +4,30 @@ import { PrismaClient } from '@prisma/client'
 // Prisma Client — PostgreSQL (Neon)
 // Single source of truth for all environments. No SQLite.
 //
+// IMPORTANT: Do NOT override datasources.db.url here. Prisma reads the
+// connection string from schema.prisma's env("DATABASE_URL") lazily —
+// only when the first query is executed at request time. This prevents
+// PrismaClientConstructorValidationError during `next build` when
+// DATABASE_URL is not yet available (build-time page data collection).
+//
 // For Neon serverless deployments:
 // - Use the pooled connection string (ends with -pooler) from the Neon dashboard
-// - The pooler handles connection multiplexing for serverless environments
-// - Connection limit is kept low to avoid exhausting Neon's connection pool
+// - Set DATABASE_URL in Vercel environment variables (Production + Preview)
 // ============================================================================
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-// In production (Vercel/Neon), use a low connection limit to avoid
-// exhausting the Neon connection pool. In development, use defaults.
-const isProduction = process.env.NODE_ENV === 'production'
-
+// Instantiate PrismaClient without a datasource override.
+// Prisma resolves DATABASE_URL from schema.prisma at query time, not at
+// construction time — this is what makes the build safe when DATABASE_URL
+// is absent during static page-data collection.
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: isProduction ? ['error', 'warn'] : ['query', 'error', 'warn'],
-    ...(isProduction
-      ? {
-          datasources: {
-            db: {
-              url: process.env.DATABASE_URL,
-            },
-          },
-        }
-      : {}),
+    log: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : ['query', 'error', 'warn'],
   })
 
-// Prevent multiple Prisma Client instances in development (hot reload)
+// Prevent multiple PrismaClient instances during dev hot reload
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db

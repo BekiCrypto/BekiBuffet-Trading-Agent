@@ -7,6 +7,7 @@ import { ASSET_PRESETS, ASSET_ORDER } from "@/lib/trading/presets";
 import type { AssetSymbol, Timeframe } from "@/lib/trading/types";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const VALID_STRATEGIES = ["BEKIBUFFET_V1", "ICHIMOKU_BREAKOUT", "MOMENTUM_SCALPER", "MEAN_REVERSION"];

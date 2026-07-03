@@ -7,6 +7,9 @@ import { NextResponse } from "next/server";
 // — the Google button auto-shows when GOOGLE_CLIENT_ID/SECRET are set.
 // ============================================================================
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
   const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
