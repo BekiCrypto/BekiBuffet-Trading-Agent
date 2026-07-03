@@ -42,11 +42,24 @@ export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db),
   session: { strategy: "jwt" },
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      allowDangerousEmailAccountLinking: true,
-    }),
+    // Only register Google provider if credentials are configured
+    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? [
+          GoogleProvider({
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+            allowDangerousEmailAccountLinking: true,
+            // Request profile + email scopes for name and avatar
+            authorization: {
+              params: {
+                prompt: "select_account",
+                access_type: "offline",
+                response_type: "code",
+              },
+            },
+          }),
+        ]
+      : []),
     CredentialsProvider({
       name: "Demo Account",
       credentials: {
@@ -72,14 +85,35 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async signIn({ user, account }) {
+      // For OAuth providers (Google), the Prisma adapter has already created
+      // the User + Account records by this point. user.id is the DB user id.
+      // For credentials, user.id comes from the authorize() return.
       if (user?.email) {
-        await provisionDefaultSubscription(user.id);
+        // Resolve the actual DB user by email to ensure we have the correct id
+        const dbUser = await db.user.findUnique({ where: { email: user.email.toLowerCase() } });
+        if (dbUser) {
+          await provisionDefaultSubscription(dbUser.id);
+        }
       }
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
-        token.id = user.id;
+        // For OAuth sign-ins, resolve the DB user by email to get the correct id
+        // (the Prisma adapter sets user.id to the DB id, but we double-check)
+        if (user.email) {
+          const dbUser = await db.user.findUnique({
+            where: { email: user.email.toLowerCase() },
+            select: { id: true },
+          });
+          if (dbUser) {
+            token.id = dbUser.id;
+          } else {
+            token.id = user.id;
+          }
+        } else {
+          token.id = user.id;
+        }
         token.email = user.email;
         token.name = user.name;
         token.picture = user.image;

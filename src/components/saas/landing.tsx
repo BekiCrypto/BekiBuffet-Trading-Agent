@@ -5,11 +5,12 @@ import { TIERS } from "@/lib/saas";
 import { useState } from "react";
 
 export function Landing() {
-  const { setView, hasGoogleOAuth, provisionDemo } = useSaaS();
+  const { setView, hasGoogleOAuth, authConfigLoaded, provisionDemo } = useSaaS();
   const [annual, setAnnual] = useState(true);
 
   const handleStart = async () => {
-    if (!hasGoogleOAuth) {
+    // Only provision demo account if Google OAuth is NOT configured
+    if (authConfigLoaded && !hasGoogleOAuth) {
       await provisionDemo();
     }
     setView("signin");

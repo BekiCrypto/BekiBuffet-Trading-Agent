@@ -292,17 +292,46 @@ NEXTAUTH_URL=https://your-domain.com
 NEXTAUTH_SECRET=your-production-secret-key
 GOOGLE_CLIENT_ID=your-google-oauth-client-id
 GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
-NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED=1
+DEMO_PASSWORD=bekibuffet
 ```
+
+> **Note:** The `NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED` flag is no longer needed — the "Continue with Google" button auto-shows when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are both set. The app calls `/api/auth/config` on load to detect this.
 
 ### Google OAuth Setup
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing
-3. Enable Google+ API
-4. Create OAuth 2.0 credentials
-5. Add your domain to authorized redirect URIs: `https://your-domain.com/api/auth/callback/google`
-6. Copy Client ID and Client Secret to your `.env`
+Google OAuth is fully integrated and auto-detected. When configured, users see a "Continue with Google" button on the sign-in page.
+
+**Setup steps:**
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select an existing one)
+3. Navigate to **APIs & Services** → **OAuth consent screen**
+   - Choose **External** user type
+   - Fill in app name (`BekiBuffet`), support email, developer contact
+   - Add scopes: `email`, `profile`, `openid`
+   - Add your domain to authorized domains
+4. Navigate to **APIs & Services** → **Credentials**
+5. Click **Create Credentials** → **OAuth 2.0 Client ID**
+6. Set Application Type to **Web application**
+7. Add **Authorized redirect URIs**:
+   - `http://localhost:3000/api/auth/callback/google` (development)
+   - `https://your-domain.com/api/auth/callback/google` (production)
+8. Copy the **Client ID** and **Client Secret** to your `.env` file:
+   ```env
+   GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   ```
+9. Restart the dev server — the "Continue with Google" button will automatically appear on the sign-in page
+
+**How it works:**
+- When a user clicks "Continue with Google", they're redirected to Google's consent screen
+- After consent, Google redirects back to `/api/auth/callback/google`
+- NextAuth's Prisma adapter creates a `User` record (if new) and an `Account` record linking the Google identity
+- The `signIn` callback auto-provisions a 14-day Pro trial subscription
+- The `jwt` callback attaches subscription tier data to the session token
+- If a user signs in with Google using an email that matches an existing demo account, the accounts are automatically linked (via `allowDangerousEmailAccountLinking`)
+
+**Without Google OAuth configured**, the app falls back to demo credentials login (`demo@bekibuffet.ai` / `bekibuffet`), which is auto-provisioned on first visit.
 
 ### Stripe Integration (Optional)
 

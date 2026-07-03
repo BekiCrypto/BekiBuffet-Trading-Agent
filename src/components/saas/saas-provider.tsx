@@ -1,7 +1,7 @@
 "use client";
 
 import { SessionProvider, useSession } from "next-auth/react";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
 type SaaSView =
   | "landing"
@@ -22,6 +22,7 @@ interface SaaSContextValue {
   activeAsset: string;
   setActiveAsset: (a: string) => void;
   hasGoogleOAuth: boolean;
+  authConfigLoaded: boolean;
   provisionDemo: () => Promise<void>;
 }
 
@@ -35,10 +36,30 @@ export function useSaaS() {
 
 function Inner({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
-  // Use a "requested view" that the user clicked; derive actual view from auth status
   const [requestedView, setRequestedView] = useState<SaaSView>("landing");
   const [activeAsset, setActiveAsset] = useState<string>("XAUUSD");
-  const hasGoogleOAuth = !!process.env.NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED;
+  // Auto-detect Google OAuth from server config (replaces manual NEXT_PUBLIC flag)
+  const [hasGoogleOAuth, setHasGoogleOAuth] = useState<boolean>(false);
+  const [authConfigLoaded, setAuthConfigLoaded] = useState<boolean>(false);
+
+  // Fetch auth config on mount — checks if Google creds are actually configured
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/config")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) {
+          setHasGoogleOAuth(!!data.googleEnabled);
+          setAuthConfigLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAuthConfigLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Derive actual view: if not authenticated, force landing/signin
   const isAuthenticated = status === "authenticated" && !!session?.user;
@@ -63,7 +84,9 @@ function Inner({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SaaSContext.Provider value={{ view, setView, activeAsset, setActiveAsset, hasGoogleOAuth, provisionDemo }}>
+    <SaaSContext.Provider
+      value={{ view, setView, activeAsset, setActiveAsset, hasGoogleOAuth, authConfigLoaded, provisionDemo }}
+    >
       {children}
     </SaaSContext.Provider>
   );

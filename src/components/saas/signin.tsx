@@ -2,10 +2,10 @@
 
 import { useSaaS } from "./saas-provider";
 import { signIn } from "next-auth/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export function SignIn() {
-  const { setView, hasGoogleOAuth, provisionDemo } = useSaaS();
+  const { setView, hasGoogleOAuth, authConfigLoaded, provisionDemo } = useSaaS();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -13,10 +13,12 @@ export function SignIn() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [demoCreds, setDemoCreds] = useState<{ email: string; password: string } | null>(null);
+  const demoProvisionedRef = useRef(false);
 
   useEffect(() => {
-    // Provision demo account if no Google OAuth
-    if (!hasGoogleOAuth) {
+    // Only provision demo account after auth config has loaded AND Google OAuth is not configured
+    if (authConfigLoaded && !hasGoogleOAuth && !demoProvisionedRef.current) {
+      demoProvisionedRef.current = true;
       provisionDemo().then(async () => {
         try {
           const r = await fetch("/api/seed", { method: "POST" });
@@ -29,7 +31,7 @@ export function SignIn() {
         } catch (e) {}
       });
     }
-  }, [hasGoogleOAuth, provisionDemo]);
+  }, [authConfigLoaded, hasGoogleOAuth, provisionDemo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,7 +65,7 @@ export function SignIn() {
         </div>
 
         <div className="bb-panel p-6">
-          {hasGoogleOAuth && (
+          {authConfigLoaded && hasGoogleOAuth && (
             <>
               <button
                 onClick={() => signIn("google", { callbackUrl: "/" })}
@@ -84,6 +86,11 @@ export function SignIn() {
                 <div className="flex-1 h-px bg-[var(--bb-border)]" />
               </div>
             </>
+          )}
+          {authConfigLoaded && hasGoogleOAuth && (
+            <div className="mb-4 text-[10px] text-[var(--bb-muted)] text-center">
+              New here? Continue with Google to instantly create your account with a 14-day Pro trial.
+            </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
