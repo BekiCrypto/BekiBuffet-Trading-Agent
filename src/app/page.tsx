@@ -1,6 +1,7 @@
 "use client";
 
 import { SaaSProvider, useSaaS } from "@/components/saas/saas-provider";
+import { ErrorBoundary } from "@/components/saas/error-boundary";
 import { AppShell } from "@/components/saas/app-shell";
 import { Landing } from "@/components/saas/landing";
 import { SignIn } from "@/components/saas/signin";
@@ -39,8 +40,10 @@ function Router() {
 
 export default function Home() {
   return (
-    <SaaSProvider>
-      <Router />
-    </SaaSProvider>
+    <ErrorBoundary>
+      <SaaSProvider>
+        <Router />
+      </SaaSProvider>
+    </ErrorBoundary>
   );
 }

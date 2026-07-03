@@ -73,7 +73,7 @@ export function RegimePanel({ regime, structures, htfBias, ltfBias }: Props) {
               ? "var(--bb-green)"
               : s.state === "Reversal"
               ? "var(--bb-red)"
-              : s.state === "Pullback" || s.state === "Transition"
+              : s.state === "Pullback" || s.state === "Compression"
               ? "var(--bb-blue)"
               : "var(--bb-amber)";
           return (

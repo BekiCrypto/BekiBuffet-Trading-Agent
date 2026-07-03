@@ -2,7 +2,7 @@
 
 import { useSaaS } from "./saas-provider";
 import { useSession } from "next-auth/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ASSET_PRESETS, ASSET_ORDER } from "@/lib/trading/presets";
 
 const STRATEGIES = [
@@ -33,7 +33,8 @@ export function Backtest() {
   const [error, setError] = useState<string | null>(null);
 
   const loadHistory = () => fetch("/api/backtest").then(r => r.json()).then(d => setHistory(d.backtests ?? []));
-  useState(() => { loadHistory(); });
+  // M6 FIX: use useEffect for side effects, not useState lazy initializer
+  useEffect(() => { loadHistory(); }, []);
 
   const run = async () => {
     setLoading(true);

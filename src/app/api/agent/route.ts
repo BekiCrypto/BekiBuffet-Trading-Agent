@@ -20,16 +20,17 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
+    const brokerAccountId = body.brokerAccountId ?? "PAPER";
     const agent = await db.agentState.upsert({
       where: {
         userId_brokerAccountId: {
           userId: session.user.id,
-          brokerAccountId: body.brokerAccountId ?? null,
+          brokerAccountId,
         },
       },
       create: {
         userId: session.user.id,
-        brokerAccountId: body.brokerAccountId ?? null,
+        brokerAccountId,
         mode: body.mode ?? "PAUSED",
         equity: body.equity ?? 100000,
         balance: body.balance ?? 100000,
@@ -45,22 +46,25 @@ export async function POST(req: Request) {
         activeAssets: body.activeAssets ?? null,
         lastTickAt: body.lastTickAt ?? new Date(),
       },
-      update: {
-        mode: body.mode,
-        equity: body.equity,
-        balance: body.balance,
-        floatingPnl: body.floatingPnl,
-        dayStartEquity: body.dayStartEquity,
-        consecutiveLosses: body.consecutiveLosses,
-        ticksProcessed: body.ticksProcessed,
-        decisionsTaken: body.decisionsTaken,
-        decisionsRejected: body.decisionsRejected,
-        decisionsWaiting: body.decisionsWaiting,
-        campaignsActive: body.campaignsActive,
-        selfLearningJson: body.selfLearningJson,
-        activeAssets: body.activeAssets,
-        lastTickAt: new Date(),
-      },
+      // M11 FIX: Filter out undefined fields so partial updates don't null out columns
+      update: Object.fromEntries(
+        Object.entries({
+          mode: body.mode,
+          equity: body.equity,
+          balance: body.balance,
+          floatingPnl: body.floatingPnl,
+          dayStartEquity: body.dayStartEquity,
+          consecutiveLosses: body.consecutiveLosses,
+          ticksProcessed: body.ticksProcessed,
+          decisionsTaken: body.decisionsTaken,
+          decisionsRejected: body.decisionsRejected,
+          decisionsWaiting: body.decisionsWaiting,
+          campaignsActive: body.campaignsActive,
+          selfLearningJson: body.selfLearningJson,
+          activeAssets: body.activeAssets,
+          lastTickAt: new Date(),
+        }).filter(([_, v]) => v !== undefined)
+      ),
     });
     return NextResponse.json({ ok: true, agent });
   } catch (e: any) {

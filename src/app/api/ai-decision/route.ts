@@ -59,20 +59,25 @@ export async function POST(req: NextRequest) {
 
     const decision = await generateAIDecision(ctx);
 
-    // Persist to DB
-    await db.aIDecision.create({
-      data: {
-        userId: session.user.id,
-        asset: asset,
-        decision: decision.decision,
-        reasoning: decision.reasoning,
-        confidence: decision.confidence,
-        factors: JSON.stringify(decision.factors),
-      },
-    });
+    // Persist to DB — wrap in try/catch so DB failure doesn't lose the decision
+    try {
+      await db.aIDecision.create({
+        data: {
+          userId: session.user.id,
+          asset: asset,
+          decision: decision.decision,
+          reasoning: decision.reasoning,
+          confidence: decision.confidence,
+          factors: JSON.stringify(decision.factors),
+        },
+      });
+    } catch (dbErr) {
+      console.error("Failed to persist AI decision:", dbErr);
+    }
 
     return NextResponse.json({ ok: true, decision });
   } catch (e: any) {
+    console.error("AI decision error:", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

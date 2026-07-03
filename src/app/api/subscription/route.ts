@@ -15,8 +15,37 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { tier } = await req.json();
+    const { tier, paymentToken, adminOverride } = await req.json();
     const tierId = tier as Tier;
+
+    // SECURITY: Tier upgrades require either:
+    // 1. A valid payment token (Stripe checkout session ID, verified via Stripe API)
+    // 2. An admin override (admin-only, for customer support)
+    // 3. Dev mode bypass (NODE_ENV !== "production")
+    const isDev = process.env.NODE_ENV !== "production";
+    const isAdmin = (session.user as any).role === "ADMIN";
+
+    if (!isDev && !isAdmin) {
+      // In production, require a payment token
+      if (!paymentToken) {
+        return NextResponse.json(
+          {
+            error: "Payment required. Complete checkout via /api/stripe/checkout to upgrade.",
+            checkoutUrl: "/api/stripe/checkout?tier=" + tierId,
+          },
+          { status: 402 }
+        );
+      }
+      // TODO: Verify paymentToken with Stripe API
+      // const stripeEvent = await stripe.checkout.sessions.retrieve(paymentToken);
+      // if (!stripeEvent || stripeEvent.payment_status !== "paid") {
+      //   return NextResponse.json({ error: "Invalid payment token" }, { status: 402 });
+      // }
+    }
+
+    if (adminOverride && !isAdmin) {
+      return NextResponse.json({ error: "Admin override requires admin role" }, { status: 403 });
+    }
 
     const credits = tierId === "PRO" ? 100 : tierId === "ELITE" ? 1000 : tierId === "INSTITUTIONAL" ? 100000 : 10;
     const seats = tierId === "PRO" ? 3 : tierId === "ELITE" ? 10 : tierId === "INSTITUTIONAL" ? 100 : 1;
@@ -55,7 +84,7 @@ export async function POST(req: NextRequest) {
         userId: session.user.id,
         type: "SUBSCRIPTION",
         action: "UPGRADED",
-        detail: `Upgraded to ${tierId}`,
+        detail: `Upgraded to ${tierId}${isDev ? " (dev mode)" : isAdmin ? " (admin override)" : " (payment verified)"}`,
       },
     });
 

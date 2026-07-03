@@ -22,11 +22,12 @@ export function Terminal() {
   const { activeAsset, setActiveAsset, setView } = useSaaS();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // M4 FIX: Only depend on startedAt, not the whole store (prevents re-fire every tick)
   useEffect(() => {
     if (state.startedAt === 0) {
       state.init();
     }
-  }, [state]);
+  }, [state.startedAt]);
 
   useEffect(() => {
     if (intervalRef.current) {

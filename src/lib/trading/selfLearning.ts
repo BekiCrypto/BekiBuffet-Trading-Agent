@@ -151,13 +151,14 @@ export function adjustWeights(state: SelfLearningState, at: number): SelfLearnin
     next.setupStats[k] = { ...s, weight: newWeight };
   }
 
+  // C8 FIX: Trim adjustments log to last 50 entries to prevent unbounded growth
   next.adjustmentsLog = [
     ...state.adjustmentsLog,
     {
       at,
       summary: changes.length > 0 ? changes.join("; ") : "No weight changes (samples too small)",
     },
-  ];
+  ].slice(-50);
 
   return next;
 }
@@ -175,6 +176,7 @@ export function buildTradeRecord(
   return {
     id: pos.id,
     asset: pos.asset,
+    direction: pos.direction, // H11 FIX: populate from position
     session,
     setup: `Scale${pos.scale}_${priceActionPattern}`,
     marketRegime: regime,

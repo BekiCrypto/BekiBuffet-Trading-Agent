@@ -16,7 +16,7 @@ export function Dashboard() {
   useEffect(() => {
     fetch("/api/broker").then(r => r.json()).then(d => setBrokers(d.brokers ?? []));
     fetch("/api/subscription").then(r => r.json()).then(d => setSub(d.subscription));
-    fetch("/api/agent?log=1").then(r => r.json()).then(d => setActivity(d.activity ?? []));
+    fetch("/api/activity?limit=20").then(r => r.json()).then(d => setActivity(d.activity ?? []));
   }, []);
 
   const tier = (session?.user as any)?.tier ?? "FREE";

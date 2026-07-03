@@ -24,22 +24,32 @@ export interface CampaignManagementResult {
   updatedBalance: number;
 }
 
-let campaignCounter = 0;
-let positionCounter = 0;
+// H5 FIX: Counter state is now per-namespace to avoid collisions between
+// the live agent and the backtest engine. The live agent uses the "LIVE"
+// namespace; backtests use "BT". resetCounters() only resets the requested
+// namespace, not both.
+const counterState: Record<string, { campaign: number; position: number }> = {
+  LIVE: { campaign: 0, position: 0 },
+  BT: { campaign: 0, position: 0 },
+};
 
-function nextCampaignId(): string {
-  campaignCounter++;
-  return `CMP-${campaignCounter.toString().padStart(4, "0")}`;
+function nextCampaignId(namespace: string = "LIVE"): string {
+  if (!counterState[namespace]) counterState[namespace] = { campaign: 0, position: 0 };
+  counterState[namespace].campaign++;
+  return `${namespace}-CMP-${counterState[namespace].campaign.toString().padStart(4, "0")}`;
 }
 
-function nextPositionId(): string {
-  positionCounter++;
-  return `POS-${positionCounter.toString().padStart(5, "0")}`;
+function nextPositionId(namespace: string = "LIVE"): string {
+  if (!counterState[namespace]) counterState[namespace] = { campaign: 0, position: 0 };
+  counterState[namespace].position++;
+  return `${namespace}-POS-${counterState[namespace].position.toString().padStart(5, "0")}`;
 }
 
-export function resetCounters() {
-  campaignCounter = 0;
-  positionCounter = 0;
+export function resetCounters(namespace: string = "LIVE") {
+  if (counterState[namespace]) {
+    counterState[namespace].campaign = 0;
+    counterState[namespace].position = 0;
+  }
 }
 
 // --- Open a new campaign --------------------------------------------------
@@ -51,15 +61,16 @@ export function openCampaign(
   currentPrice: number,
   atrValue: number,
   riskCtx: RiskContext,
-  now: number
+  now: number,
+  namespace: string = "LIVE"
 ): { campaign: Campaign; position: Position; decision: DecisionLogEntry } | null {
   const risk = computeRisk(riskCtx, direction);
   if (!risk.allowed) {
     return null;
   }
 
-  const id = nextCampaignId();
-  const posId = nextPositionId();
+  const id = nextCampaignId(namespace);
+  const posId = nextPositionId(namespace);
   const position: Position = {
     id: posId,
     asset: preset.symbol,
@@ -116,7 +127,8 @@ export function scaleIntoCampaign(
   currentPrice: number,
   atrValue: number,
   riskCtx: RiskContext,
-  now: number
+  now: number,
+  namespace: string = "LIVE"
 ): { position: Position; decision: DecisionLogEntry } | null {
   if (campaign.positions.length >= campaign.maxScale) return null;
   if (campaign.status === "Closing" || campaign.status === "Closed") return null;
@@ -133,7 +145,7 @@ export function scaleIntoCampaign(
       : campaign.averageEntry - currentPrice;
   if (favorable < -atrValue * 0.5) return null; // don't scale into losers
 
-  const posId = nextPositionId();
+  const posId = nextPositionId(namespace);
   const scale = campaign.positions.length + 1;
   const position: Position = {
     id: posId,
@@ -203,6 +215,9 @@ export function manageCampaigns(
     if (!candles || !preset) continue;
     const atrValue = atr(candles[preset.executionTimeframe], 14);
     const currentPrice = candles[preset.executionTimeframe].at(-1)?.close ?? 0;
+    // H8 FIX: Skip campaign management if price is invalid (empty candles, NaN, 0)
+    // Otherwise all Longs would stop out instantly at price=0, liquidating the book.
+    if (!currentPrice || !Number.isFinite(currentPrice) || currentPrice <= 0) continue;
 
     let campaignClosed = false;
 

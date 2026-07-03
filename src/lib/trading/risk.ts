@@ -110,8 +110,27 @@ export function computeRisk(ctx: RiskContext, direction: "Long" | "Short"): Risk
     };
   }
 
-  // Stop distance from ATR
+  // Stop distance from ATR — guard against zero/negative ATR (prevents Infinity position size)
   const atrStopDistance = ctx.atr * preset.atrMultiplier;
+  if (!Number.isFinite(atrStopDistance) || atrStopDistance <= 0) {
+    return {
+      riskPerTradePct: 0,
+      riskAmount: 0,
+      atrStopDistance: 0,
+      atrStopPips: 0,
+      positionSizeUnits: 0,
+      positionSizeLots: 0,
+      takeProfitDistance: 0,
+      takeProfitPrice: 0,
+      stopLossPrice: 0,
+      riskRewardRatio: 0,
+      allowed: false,
+      blockReason: `ATR stop distance invalid (${atrStopDistance}) — no safe entry`,
+      exposureAfterPct: currentExposurePct,
+      dailyLossPct,
+      consecutiveProtectionActive: ctx.consecutiveLosses >= 2,
+    };
+  }
   const atrStopPips = atrStopDistance / preset.pipSize;
   const stopLossPrice =
     direction === "Long" ? ctx.currentPrice - atrStopDistance : ctx.currentPrice + atrStopDistance;

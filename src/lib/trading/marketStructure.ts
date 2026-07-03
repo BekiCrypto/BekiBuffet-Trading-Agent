@@ -72,7 +72,8 @@ export function analyzeMarketStructure(candles: Candle[]): MarketStructureReadin
   const atrPercentage = atrPct(candles, 14);
   const recentRanges = candles.slice(-10).map((c) => c.high - c.low);
   const avgRange = recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length;
-  const compressionRatio = avgRange / atrValue;
+  // H2 FIX: Guard against division by zero when ATR is 0 (flat/dead market)
+  const compressionRatio = atrValue > 0 ? avgRange / atrValue : 0;
 
   // Pullback: trend direction intact but last candle retraces > 0.5 * ATR against
   const priorClose = candles.at(-2)!.close;
@@ -84,17 +85,20 @@ export function analyzeMarketStructure(candles: Candle[]): MarketStructureReadin
   // Determine state ---------------------------------------------------------
   let state: StructureState;
   let confidence = 50;
+  // Note: trendDirection may be narrowed by TS via choch/bos/pullback computations;
+  // re-derive a fresh reference to restore the full union for the decision tree.
+  const dir: "Up" | "Down" | "Flat" = trendDirection;
 
   if (choch) {
     state = "Reversal";
     confidence = 75;
-  } else if (bos && trendDirection !== "Flat") {
+  } else if (bos && dir !== "Flat") {
     state = "Breakout";
     confidence = 80;
-  } else if (trendDirection !== "Flat" && pullback) {
+  } else if (dir !== "Flat" && pullback) {
     state = "Pullback";
     confidence = 70;
-  } else if (trendDirection !== "Flat") {
+  } else if (dir !== "Flat") {
     state = "Trend";
     confidence = 60 + Math.min(30, Math.abs(upBias - downBias) * 8);
   } else if (compressionRatio < 0.7) {

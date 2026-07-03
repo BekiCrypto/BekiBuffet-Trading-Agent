@@ -201,7 +201,7 @@ export async function disconnectBroker(brokerId: string) {
 export async function getAgentState(brokerId: string | null) {
   const session = await requireUser();
   return db.agentState.findUnique({
-    where: { userId_brokerAccountId: { userId: session.user.id, brokerAccountId: brokerId } },
+    where: { userId_brokerAccountId: { userId: session.user.id, brokerAccountId: brokerId ?? "PAPER" } },
   });
 }
 
@@ -222,19 +222,22 @@ export async function upsertAgentState(state: {
   activeAssets: string;
 }) {
   const session = await requireUser();
+  const userId = session.user.id;
+  const { brokerAccountId, ...rest } = state;
+  const effectiveBrokerId = brokerAccountId ?? "PAPER";
   await db.agentState.upsert({
     where: {
       userId_brokerAccountId: {
-        userId: session.user.id,
-        brokerAccountId: state.brokerAccountId,
+        userId,
+        brokerAccountId: effectiveBrokerId,
       },
     },
     create: {
-      userId: session.user.id,
-      brokerAccountId: state.brokerAccountId,
-      ...state,
+      userId,
+      brokerAccountId: effectiveBrokerId,
+      ...rest,
     },
-    update: state,
+    update: rest,
   });
   return { ok: true };
 }

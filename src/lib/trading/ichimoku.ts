@@ -60,11 +60,16 @@ export function computeIchimoku(candles: Candle[]): IchimokuReading {
   const tenkan = tenkanSen(candles, lastIdx);
   const kijun = kijunSen(candles, lastIdx);
 
-  // Senkou A/B at current time (shifted back from future)
+  // Senkou A/B at current time (shifted back from future by DISPLACEMENT=26)
+  // H1 FIX: Senkou B is the midpoint of the 52-period high/low at the displaced
+  // index — NOT an average of two kijunSen values. The previous formula was wrong.
   const aIdx = lastIdx - DISPLACEMENT;
   const bIdx = lastIdx - DISPLACEMENT;
   const senkouA = (tenkanSen(candles, aIdx) + kijunSen(candles, aIdx)) / 2;
-  const senkouB = (kijunSen(candles, bIdx - SENKOU_B + KIJUN) + kijunSen(candles, bIdx)) / 2;
+  // Senkou B = (highest(high, 52) + lowest(low, 52)) / 2 over window ending at bIdx
+  const senkouBHigh = highest(candles.map((c) => c.high), SENKOU_B, bIdx);
+  const senkouBLow = lowest(candles.map((c) => c.low), SENKOU_B, bIdx);
+  const senkouB = (senkouBHigh + senkouBLow) / 2;
 
   // Cloud geometry
   const cloudTop = Math.max(senkouA, senkouB);

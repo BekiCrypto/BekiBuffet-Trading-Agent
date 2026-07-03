@@ -2,12 +2,33 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
-// Provision a demo user with Pro tier if none exists.
-// Called automatically by the SaaS shell when no GOOGLE_CLIENT_ID is configured.
-export async function POST() {
+// Provision a demo user with Elite tier if none exists.
+// SECURITY: Only allowed in non-production environments OR when a valid SETUP_TOKEN
+// is provided via the X-Setup-Token header. This prevents unauthorized admin provisioning.
+export async function POST(req: Request) {
   try {
+    // Allow in development, or with a setup token in production
+    const isDev = process.env.NODE_ENV !== "production";
+    const setupToken = process.env.SETUP_TOKEN;
+    const providedToken = req.headers.get("x-setup-token");
+
+    if (!isDev) {
+      if (!setupToken) {
+        return NextResponse.json(
+          { error: "Demo provisioning disabled in production. Set SETUP_TOKEN env var to enable." },
+          { status: 403 }
+        );
+      }
+      if (providedToken !== setupToken) {
+        return NextResponse.json(
+          { error: "Invalid setup token." },
+          { status: 403 }
+        );
+      }
+    }
+
     const email = "demo@bekibuffet.ai";
-    const password = "bekibuffet";
+    const password = process.env.DEMO_PASSWORD || "bekibuffet";
     const existing = await db.user.findUnique({ where: { email } });
     if (existing) {
       return NextResponse.json({
@@ -24,7 +45,7 @@ export async function POST() {
         email,
         name: "BekiBuffet Demo",
         password: hashed,
-        role: "ADMIN",
+        role: "USER", // not ADMIN — demo users are regular users with Elite tier
       },
     });
     await db.subscription.create({
@@ -38,7 +59,7 @@ export async function POST() {
         backtestCredits: 1000,
         aiAgentEnabled: true,
         edgeDiscoveryEnabled: true,
-        currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
     });
     // Seed a demo broker account

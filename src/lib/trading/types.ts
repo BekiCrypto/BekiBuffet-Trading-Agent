@@ -237,6 +237,7 @@ export interface DoNotTradeEvaluation {
 export interface TradeRecord {
   id: string;
   asset: AssetSymbol;
+  direction: "Long" | "Short"; // H11 FIX: was missing — AI agent fabricated direction from PnL sign
   session: string;
   setup: string;
   marketRegime: RegimeType;
@@ -318,7 +319,7 @@ export interface AgentStatus {
 export interface DecisionLogEntry {
   id: string;
   time: number;
-  asset: AssetSymbol;
+  asset: AssetSymbol | "SYSTEM"; // SYSTEM for agent-level events (halts, rollovers)
   action: "Open" | "Scale" | "Trail" | "Breakeven" | "Close" | "Reject" | "Wait";
   direction?: "Long" | "Short";
   score?: number;

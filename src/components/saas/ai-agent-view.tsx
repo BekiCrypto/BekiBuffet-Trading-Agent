@@ -81,7 +81,7 @@ export function AIAgent() {
       recentTrades: state.closedTrades.slice(-20).map(t => ({
         asset: t.asset,
         pnl: t.pnl,
-        direction: t.pnl >= 0 ? "Long" : "Short",
+        direction: t.direction, // H11 FIX: use actual trade direction, not PnL-derived
         exitReason: t.exitReason,
         openTime: t.openTime,
       })),

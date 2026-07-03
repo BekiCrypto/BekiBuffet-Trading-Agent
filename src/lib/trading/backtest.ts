@@ -152,7 +152,8 @@ export function generateHistoricalCandles(
 
 export function runBacktest(config: BacktestConfig): BacktestResult {
   const startMs = Date.now();
-  resetCounters();
+  // H5 FIX: Only reset the BT namespace, not the LIVE namespace
+  resetCounters("BT");
 
   const preset = ASSET_PRESETS[config.asset];
   const candles = generateHistoricalCandles(
@@ -321,12 +322,12 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         dayStartEquity,
       };
       if (!existing) {
-        const opened = openCampaign(effectivePreset, confluence.direction, confluence, cur.close, atrValue, riskCtx, cur.time);
+        const opened = openCampaign(effectivePreset, confluence.direction, confluence, cur.close, atrValue, riskCtx, cur.time, "BT");
         if (opened) {
           campaigns.push(opened.campaign);
         }
       } else if (existing.direction === confluence.direction && existing.positions.length < existing.maxScale) {
-        const scaled = scaleIntoCampaign(existing, effectivePreset, confluence, cur.close, atrValue, riskCtx, cur.time);
+        const scaled = scaleIntoCampaign(existing, effectivePreset, confluence, cur.close, atrValue, riskCtx, cur.time, "BT");
         // scaled returned; nothing else to do
       }
     }

@@ -11,7 +11,7 @@ export function Settings() {
 
   useEffect(() => {
     // Use the agent endpoint to fetch activity log
-    fetch("/api/agent?log=1").then(r => r.json()).then(d => setActivity(d.activity ?? []));
+    fetch("/api/activity?limit=50").then(r => r.json()).then(d => setActivity(d.activity ?? []));
   }, []);
 
   const tier = (session?.user as any)?.tier ?? "FREE";

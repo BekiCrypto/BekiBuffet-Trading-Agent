@@ -383,11 +383,33 @@ export const useBekiBuffet = create<BekiBuffetState>((set, get) => ({
         };
 
     // 4. Record closed trades + update balance
+    // C4 FIX: Track consecutive losses at the CAMPAIGN level (one increment per
+    // closed campaign, not per position). A campaign stop-out closes up to 3
+    // positions at once; incrementing per-position would jump the ladder 3x.
     let balanceDelta = 0;
     let newConsecutiveLosses = state.consecutiveLosses;
     const newClosedTrades: TradeRecord[] = [...state.closedTrades];
     const newDecisions: DecisionLogEntry[] = [...state.decisionLog, ...managed.decisions];
 
+    // Group closed positions by campaign to determine campaign-level PnL
+    const closedByCampaign = new Map<string, { campaign: typeof managed.closedPositions[0]["campaign"]; totalPnl: number; positions: typeof managed.closedPositions }>();
+    for (const closed of managed.closedPositions) {
+      const existing = closedByCampaign.get(closed.campaign.id);
+      if (existing) {
+        existing.totalPnl += closed.pnl;
+        existing.positions.push(closed);
+      } else {
+        closedByCampaign.set(closed.campaign.id, {
+          campaign: closed.campaign,
+          totalPnl: closed.pnl,
+          positions: [closed],
+        });
+      }
+    }
+
+    // C5 FIX: Track starting index so each closed position gets its own trade record
+    const tradesStartIdx = newClosedTrades.length;
+    let tradeIdx = 0;
     for (const closed of managed.closedPositions) {
       const preset = ASSET_PRESETS[closed.campaign.asset];
       const snapshot = newSnapshots[closed.campaign.asset];
@@ -407,18 +429,22 @@ export const useBekiBuffet = create<BekiBuffetState>((set, get) => ({
       );
       newClosedTrades.push(record);
       balanceDelta += closed.pnl;
-      if (closed.pnl < 0) {
+      tradeIdx++;
+    }
+
+    // C4 FIX: Consecutive-loss counter updates per-campaign, not per-position
+    for (const [, { totalPnl }] of closedByCampaign) {
+      if (totalPnl < 0) {
         newConsecutiveLosses += 1;
-      } else if (closed.pnl > 0) {
+      } else if (totalPnl > 0) {
         newConsecutiveLosses = 0;
       }
     }
 
-    // 5. Self-learning update
+    // 5. Self-learning update — each closed position gets its own record
     let selfLearning = state.selfLearning;
-    for (const closed of managed.closedPositions) {
-      const snapshot = newSnapshots[closed.campaign.asset];
-      const record = newClosedTrades[newClosedTrades.length - 1];
+    for (let i = 0; i < managed.closedPositions.length; i++) {
+      const record = newClosedTrades[tradesStartIdx + i];
       if (record) selfLearning = recordTrade(selfLearning, record);
     }
 
@@ -506,19 +532,45 @@ export const useBekiBuffet = create<BekiBuffetState>((set, get) => ({
     } // end if (isRunning)
 
     // 7. Compute updated equity and balance
+    // C6 FIX: totalFloatingPnl was computed from state.campaigns (pre-mutation)
+    // and includes positions that manageCampaigns just closed. Subtract the
+    // closed positions' PnL to avoid double-counting (once realized in balance,
+    // once still-floating in equity).
+    const closedPnlSum = managed.closedPositions.reduce((s, c) => s + c.pnl, 0);
+    const adjustedFloatingPnl = totalFloatingPnl - closedPnlSum;
     const newBalance = state.balance + balanceDelta;
-    const newEquity = newBalance + totalFloatingPnl;
+    const newEquity = newBalance + adjustedFloatingPnl;
+
+    // C7 FIX: Day rollover — reset dayStartEquity at the start of each UTC day
+    const today = new Date(now).getUTCDate();
+    const lastDay = new Date(state.lastTickAt || state.startedAt).getUTCDate();
+    let newDayStartEquity = state.dayStartEquity;
+    if (state.startedAt > 0 && today !== lastDay) {
+      newDayStartEquity = newBalance; // reset baseline to start-of-day balance
+    }
 
     // Halt if equity drops below 50% (catastrophic protection)
     let newMode: AgentMode = state.mode;
-    if (newEquity < state.dayStartEquity * 0.5) {
+    if (Number.isFinite(newEquity) && newEquity < newDayStartEquity * 0.5) {
       newMode = "Halted";
       newDecisions.push({
         id: `DEC-${now}-halt`,
         time: now,
-        asset: "XAUUSD",
+        asset: "SYSTEM",
         action: "Close",
-        reason: `Agent halted — equity dropped below 50% of day start`,
+        reason: `Agent halted — equity $${newEquity.toFixed(0)} dropped below 50% of day start $${newDayStartEquity.toFixed(0)}`,
+        price: 0,
+      });
+    }
+    // Safety: if equity is NaN/Infinity, halt immediately
+    if (!Number.isFinite(newEquity)) {
+      newMode = "Halted";
+      newDecisions.push({
+        id: `DEC-${now}-nan-halt`,
+        time: now,
+        asset: "SYSTEM",
+        action: "Close",
+        reason: `Agent halted — equity became non-finite (${newEquity})`,
         price: 0,
       });
     }
@@ -534,9 +586,10 @@ export const useBekiBuffet = create<BekiBuffetState>((set, get) => ({
       decisionLog: trimmedDecisions,
       selfLearning,
       balance: newBalance,
-      equity: newEquity,
-      floatingPnl: totalFloatingPnl,
+      equity: Number.isFinite(newEquity) ? newEquity : state.balance,
+      floatingPnl: adjustedFloatingPnl,
       consecutiveLosses: newConsecutiveLosses,
+      dayStartEquity: newDayStartEquity,
       mode: newMode,
       lastTickAt: now,
       ticksProcessed: newTicksProcessed,
@@ -565,7 +618,7 @@ export const useBekiBuffet = create<BekiBuffetState>((set, get) => ({
 
   reset: () => {
     resetSimulator();
-    resetCounters();
+    resetCounters("LIVE"); // only reset live namespace, not backtest
     set({
       mode: "Paused",
       startedAt: 0,

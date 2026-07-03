@@ -196,7 +196,7 @@ model EdgeProfile {
 model AgentState {
   id              String   @id @default(cuid())
   userId          String
-  brokerAccountId String?  // null = paper trading
+  brokerAccountId String   @default("PAPER") // "PAPER" = paper trading, else broker account ID
   mode            String   @default("PAUSED") // PAUSED | RUNNING | HALTED
   equity          Float    @default(10000)
   balance         Float    @default(10000)
