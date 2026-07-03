@@ -34,14 +34,14 @@ BekiBuffet is a complete autonomous AI trading decision engine built as a multi-
 - **Backtesting Engine**: 4 strategies × 5 assets × 2 timeframes with walk-forward validation
 - **Edge Discovery**: Autonomous parameter search across 240 configurations
 - **AI Agent**: LLM-powered meta-decisions with reasoning, factors, and self-learning insights
-- **Multi-tenant**: Prisma + SQLite with full audit trail
+- **Multi-tenant**: Prisma + PostgreSQL (Neon) with full audit trail
 
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript 5
 - **Styling**: Tailwind CSS 4 + shadcn/ui
-- **Database**: Prisma ORM (SQLite)
+- **Database**: Prisma ORM (PostgreSQL / Neon)
 - **Auth**: NextAuth.js v4 with Prisma adapter
 - **State**: Zustand (client) + TanStack Query (server)
 - **AI**: z-ai-web-dev-sdk (LLM completions)
@@ -72,7 +72,7 @@ BekiBuffet is a complete autonomous AI trading decision engine built as a multi-
 
 - Node.js 18+
 - Bun (recommended) or npm
-- SQLite (bundled)
+- PostgreSQL database (Neon recommended for serverless)
 
 ### Installation
 
@@ -86,15 +86,14 @@ bun install
 
 # Set up environment variables
 cp .env.example .env
-# Edit .env with your values:
-# DATABASE_URL=file:./db/custom.db
+# Edit .env with your Neon PostgreSQL connection string:
+# DATABASE_URL=postgresql://user:password@ep-xxx.region.aws.neon.tech/bekibuffet?sslmode=require
 # NEXTAUTH_URL=http://localhost:3000
 # NEXTAUTH_SECRET=your-secret-key-here
 # GOOGLE_CLIENT_ID=your-google-oauth-client-id (optional)
 # GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret (optional)
-# NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED=1 (set if Google OAuth configured)
 
-# Initialize database
+# Initialize database (creates all tables in Neon PostgreSQL)
 bun run db:push
 
 # Start development server
@@ -272,22 +271,54 @@ The LLM-powered meta-decision layer synthesizes ALL market context into ONE stru
 # Run linting
 bun run lint
 
-# Push schema changes
+# Push schema changes to Neon PostgreSQL
 bun run db:push
 
-# Generate Prisma client
+# Generate Prisma client (auto-runs on build and install)
 bun run db:generate
 
-# Run migrations
+# Create and apply a migration (development)
 bun run db:migrate
+
+# Deploy migrations (production)
+bun run db:deploy
 ```
+
+### Database Setup (Neon PostgreSQL)
+
+BekiBuffet uses **PostgreSQL via Neon** as the single source of truth for all environments. No SQLite is used anywhere.
+
+**Creating a Neon database:**
+
+1. Go to [https://console.neon.tech](https://console.neon.tech) and sign up / sign in
+2. Create a new project (e.g., `bekibuffet`)
+3. Copy the connection string from the dashboard — it looks like:
+   ```
+   postgresql://user:password@ep-cool-name-123456.us-east-2.aws.neon.tech/bekibuffet?sslmode=require
+   ```
+4. Set it as `DATABASE_URL` in your `.env` (local) and in Vercel environment variables (production)
+5. Run `bun run db:push` to create all tables
+6. The build process automatically runs `prisma generate` before `next build` via the `postinstall` and `build` scripts
+
+**Vercel deployment:**
+
+1. Push your code to GitHub
+2. Import the repository in Vercel
+3. Add environment variables in Vercel project settings:
+   - `DATABASE_URL` — your Neon PostgreSQL connection string
+   - `NEXTAUTH_URL` — your production URL (e.g., `https://your-app.vercel.app`)
+   - `NEXTAUTH_SECRET` — a secure random string
+   - `GOOGLE_CLIENT_ID` — from Google Cloud Console
+   - `GOOGLE_CLIENT_SECRET` — from Google Cloud Console
+4. Deploy — Vercel runs `bun run build` which executes `prisma generate && next build`
+5. After the first deploy, run `bun run db:push` locally (with the production `DATABASE_URL`) to initialize the Neon schema
 
 ## Production Deployment
 
 ### Environment Variables
 
 ```env
-DATABASE_URL=file:./db/custom.db
+DATABASE_URL=postgresql://user:password@ep-xxx.region.aws.neon.tech/bekibuffet?sslmode=require
 NEXTAUTH_URL=https://your-domain.com
 NEXTAUTH_SECRET=your-production-secret-key
 GOOGLE_CLIENT_ID=your-google-oauth-client-id

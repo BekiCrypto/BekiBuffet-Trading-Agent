@@ -57,3 +57,11 @@ server.log
 scripts/
 db/*.db
 db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+/db/
+db/*.db
+db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+/db/-journal
